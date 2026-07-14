@@ -1,7 +1,7 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.2
+**Version:** 1.3
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
 **Date:** 14 July 2026
@@ -162,7 +162,17 @@ BROKKR is built **spine first, executor last**. This ordering is deliberate and 
 
 ### 5.2 The checkpoint
 
-At every checkpoint you produce: the phase report (`reports/`), the conformance check (§5.3, `conformance/`), any gap reports (`gaps/`), any test records (`tests/records/`), and the current state of your auto memory for DAP review (§12). Then you stop.
+At every checkpoint you produce: the phase report (`reports/`), the conformance check (§5.3, `conformance/`), any gap reports (`gaps/`), any test records (`tests/records/`), and the current state of your auto memory for DAP review (§11). Then you stop.
+
+**Every approved checkpoint ends in a commit. Uncommitted work does not exist.** A phase is not complete when its files are written — it is complete when its artifacts are committed and pushed. Work that sits only in the working tree is one stray file-copy from being lost, and this has already happened once in this repository: v1.1 of these rules was overwritten before it was ever committed and survived only because its content was carried forward by hand. That was luck. The commit is the process that replaces the luck.
+
+Three rules follow, and they are not optional:
+
+- **Builder work and DAP-placed specification changes are separate commits, never mixed.** The builder's phase artifacts (reports, conformance checks, gap files, code) are one commit. A revision the DAP places to `CLAUDE.md` or the architecture is a different commit. A single commit that mixes "what the builder produced" with "what the specification now says" destroys the record of which is which.
+- **The commit message states what was produced and who authored it.** Plain and factual (§9). A reader of `git log` can tell, from the message alone, whether a commit is builder output or a placed specification change, and what phase it belongs to.
+- **A revision to `CLAUDE.md` or the architecture is committed *before* any work begins under it.** Git must record which version of the rules and which revision of the architecture each phase was built against. You do not start a phase against an uncommitted spec change; you commit the spec change first, then build, so the history shows the order truthfully.
+
+A builder-authored draft of these rules (a permitted add-only auto-draft under §4) is itself committed as builder work; the DAP's review of that diff, and the commit that lands it, are the ratification. The builder proposes in the working tree; the commit records the decision.
 
 ### 5.3 The conformance check — mandatory at every phase
 
@@ -319,6 +329,8 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.3 — 14 July 2026.** Adds the checkpoint-commit rule to Section 5.2. Every approved checkpoint ends in a commit; a phase is not complete until its artifacts are committed and pushed; builder work and DAP-placed specification changes are separate commits, never mixed; and a revision to `CLAUDE.md` or the architecture is committed before any work begins under it, so git records which version each phase was built against. Motivated by a real near-loss: v1.1 was overwritten before being committed and survived only because it was carried forward by hand. The rule adds a constraint and relaxes nothing, so it is a permitted auto-draft under Section 4. Also corrects the Section 5.2 cross-reference to auto memory from §12 to §11. No other section changed; no requirement relaxed.
 
 **v1.2 — 14 July 2026.** Aligns the build rules to Architecture Rev 1.1, which closed five conformance gaps in Rev 1.0. Every change adds or tightens; nothing is relaxed.
 
