@@ -1,0 +1,7 @@
+/target/
+**/target/
+.env
+*.pem
+*.key
+desktop.ini
+Thumbs.db
