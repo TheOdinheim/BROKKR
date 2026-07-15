@@ -1,10 +1,10 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.4
+**Version:** 1.5
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
-**Date:** 14 July 2026
+**Date:** 15 July 2026
 **Status:** Operative. These rules bind every build action in this repository.
 
 ---
@@ -21,7 +21,13 @@ The following documents are the normative authority for this repository. They ar
 @governance/AMD-005-resolution-homeostasis.md
 @governance/AMD-006-accountable-risk-acceptance.md
 @governance/AMD-007-barrier-data-custody.md
+@governance/AMD-008-risk-surveillance.md
+@governance/AMD-009-personal-data-lifecycle.md
 @docs/BROKKR-ARCH-2026-001.md
+
+**The corpus grew on 15 July 2026: it is now ten amendments, not eight.** AMD-008 adds OQGF-P-10 (the Risk Register — continuous identification, assessment, and four-way disposition of all risk, not only the two conserved patterns the Deterministic Gates catch). AMD-009 adds OQGF-P-11 (personal-data lifecycle obligations, resolved against the OQGF-A never-delete principle by crypto-shredding — erasure by destroying a per-subject quantum-safe key, not the record). **Every conformance result recorded before this date was measured against the eight-amendment corpus and is now provisional.** A prior "0 absent" means "0 absent against eight amendments," not against ten. No phase already approved is reopened automatically, but the next conformance check in each affected crate SHALL enumerate OQGF-P-10 and OQGF-P-11 in scope and record their verdict — `satisfied`, `partial`, `absent`, or `n.a. with justification` — like any other requirement. Silence is not a pass (§5.3).
+
+**Where the two new requirements are expected to land** (a pointer, not a substitute for the check): OQGF-P-10's `RiskRegister` / `RiskEntry` / `Disposition` types are `brokkr-core` shapes persisted through `brokkr-audit` (SAGA) — Phase 1 type surface, Phase 7 persistence; its `Accept` disposition reuses the AMD-006 `RiskAcceptance` type unchanged. OQGF-P-11's crypto-shredding is a `brokkr-crypto` obligation — per-subject ML-KEM-wrapped keys and durable key destruction — landing in Phase 2, with the personal-data classification tag composing onto the existing AMD-007 vocabulary in `brokkr-barrier` (Phase 6) and the erasure tombstone in SAGA (Phase 7). Whether `brokkr-core` as already built is missing any type-level obligation from either amendment is a delta check, not an assumption, and it runs before Phase 1 is considered closed.
 
 **The corpus is not reducible.** A Phase 0 recommendation proposed moving AMD-003, AMD-004, and AMD-005 to on-demand reading as "Phase-8 physiology." Architecture Rev 1.1 settles that: **AMD-004** defines `Signal`, a `brokkr-core` type built in **Phase 1**; **AMD-005** governs EIR, without which the architecture contained a prohibited one-way ratchet; **AMD-003** governs KVASIR, now in scope by DAP decision. All nine imports are load-bearing. None is deferred.
 
@@ -350,6 +356,8 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.5 — 15 July 2026.** Adds AMD-008 and AMD-009 to the import corpus, which is now ten amendments. AMD-008 introduces OQGF-P-10 (the Risk Register: continuous identification, assessment, and four-way disposition — avoid, reduce, transfer, accept — of all risk in scope, with the accept branch reusing the AMD-006 OQGF-P-9 machinery unchanged). AMD-009 introduces OQGF-P-11 (personal-data lifecycle obligations — minimization, purpose limitation, retention bounds, erasure, and subject rights — resolving the erasure-versus-never-delete contradiction by crypto-shredding: destroying a per-subject quantum-safe key rather than the record, so the append-only chain is preserved and the content is made cryptographically irrecoverable). Section 0 records that the corpus grew, states where the two requirements are expected to land in the build (OQGF-P-10 types in `brokkr-core` / persistence in `brokkr-audit`; OQGF-P-11 crypto-shredding in `brokkr-crypto`, classification tag in `brokkr-barrier`, tombstone in `brokkr-audit`), and — the load-bearing point — declares that **every conformance result recorded before this date is now provisional**, having been measured against eight amendments rather than ten. No already-approved phase is reopened automatically, but the next conformance check in each affected crate SHALL enumerate OQGF-P-10 and OQGF-P-11 in scope and record a verdict for each; a delta check against `brokkr-core` as already built runs before Phase 1 is considered closed. This change adds two requirements to the baseline and relaxes nothing. Neither amendment is a Deterministic Gate; neither alters the fail-closed behavior of OQGF-G-4 or OQGF-M-1. Placed by the DAP.
 
 **v1.4 — 14 July 2026.** Aligns the build rules to Architecture Rev 1.2, which disposed the eight ABSENT findings of GAP-2026-07-14-001. The central finding was that MÍMIR bypassed HÚÐ: the context shipped to the reasoner on every hop — the largest egress path in the system — passed no gate, because the model was modeled as a trait and not as a network destination. Every change here adds or tightens; nothing is relaxed.
 
