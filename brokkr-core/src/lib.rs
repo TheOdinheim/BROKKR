@@ -102,8 +102,10 @@ pub mod gate;
 pub mod genome;
 pub mod ids;
 pub mod intent;
+pub mod personal_data;
 pub mod reasoner;
 pub mod resolution;
+pub mod risk;
 pub mod signal;
 pub mod tolerance;
 
@@ -130,9 +132,14 @@ pub use intent::{
     AttenuationError, Capability, Caveat, IntentChain, IntentChainEntry, IntentProvenanceChain,
     IntentScope, Invariant, InvariantSet, RootIntent,
 };
+pub use personal_data::{Purpose, RetentionPeriod};
 pub use reasoner::{ClearedContext, Context, ContextClearance, Proposal, Reasoner, ReasonerError};
 pub use resolution::{
     EscalationType, ResolutionDecision, ResolutionEngine, ResolutionVerdict, ResolveError,
+};
+pub use risk::{
+    DeterministicGateId, Disposition, Impact, Likelihood, RiskAcceptance, RiskEntry, RiskId,
+    RiskRegister, RiskSource, TransferMechanism, TreatmentPlan, TreatmentStatus,
 };
 pub use signal::{PostureEffect, Severity, Signal, SignalClass, SignalScope};
 pub use tolerance::{
