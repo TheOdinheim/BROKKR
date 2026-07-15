@@ -1,7 +1,7 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.3
+**Version:** 1.4
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
 **Date:** 14 July 2026
@@ -66,6 +66,8 @@ If you find yourself writing code where a model's output influences a gate's ver
 
 The principle is symmetric. The spine must not be talked *past* — and it must not be allowed to strangle the work it exists to enable. A gate so tight that BROKKR denies most legitimate coding actions is not a safe agent; it is a useless one, and under OQGF-P-1 that failure has **equal standing** to a missed threat. The host-harm bound is not a nice-to-have. It is a requirement.
 
+The principle is also **bidirectional**. It governs what comes *out* of the model and what goes *into* it. The context BROKKR ships to the reasoner — the largest flow of data in the system, carrying whatever it has read — is a crossing, and it passes the barrier like every other crossing. A gate on the model's output while its input streams out unexamined is not a gate. See Section 3, I-12, and BROKKR-ARCH §6.10 (BIFRÖST).
+
 ---
 
 ## 3. Non-negotiable structural invariants
@@ -85,13 +87,13 @@ These are properties of the *code*, not the documentation. Each must be true by 
 `ToleranceController::grant` returns `Err(ToleranceError::NonSuppressibleGate)` when the target's `ResponseClass` is `Deterministic` (OQGF-P-2). It returns an error. It never silently no-ops. There is no configuration, feature flag, environment variable, or operator action that turns this off.
 
 **I-5 — The spine does not depend on what it governs.**
-No governance crate (`brokkr-core`, `brokkr-crypto`, `brokkr-genome`, `brokkr-intent`, `brokkr-gate`, `brokkr-barrier`, `brokkr-sentinel`, `brokkr-adapt`, `brokkr-audit`) may depend on `brokkr-reasoner`, `brokkr-tools`, or `brokkr-cli`. The dependency direction is one-way and is enforced in CI. If you need a type from the wrong side of that line, the type is in the wrong crate.
+No governance crate (`brokkr-core`, `brokkr-crypto`, `brokkr-bifrost`, `brokkr-genome`, `brokkr-intent`, `brokkr-gate`, `brokkr-barrier`, `brokkr-sentinel`, `brokkr-adapt`, `brokkr-audit`) may depend on `brokkr-reasoner`, `brokkr-tools`, or `brokkr-cli`. The dependency direction is one-way and is enforced in CI. If you need a type from the wrong side of that line, the type is in the wrong crate. **`brokkr-bifrost` is a governance crate:** it depends on `brokkr-crypto` and `brokkr-barrier`, and `brokkr-reasoner` depends on *it* — never the reverse. The gate cannot be made to depend on the thing it gates.
 
-**I-6 — Only one crate talks to a model.**
-`brokkr-reasoner` is the sole crate permitted to make a model API call. No gate, sentinel, barrier, resolution, adaptation, or audit path performs network I/O to a model, directly or transitively.
+**I-6 — Only one crate talks to a model, and only through the crossing.**
+`brokkr-reasoner` is the sole crate permitted to make a model API call, **and it makes that call only through `brokkr-bifrost`.** No gate, sentinel, barrier, resolution, adaptation, or audit path performs network I/O to a model, directly or transitively. There is no path from `brokkr-reasoner` to a network socket that does not pass through BIFRÖST.
 
 **I-7 — The governor is itself governed.**
-Actions that modify BROKKR's own control surface — the genome (tools, CBOM, AIBOM), an invariant set, gate configuration, classification policy, a tolerance grant, or activation of a learned detector — are `PrivilegeClass::SelfModifying`. They are costimulated like any other privileged action **and** require explicit DAP confirmation. There is no god-mode, no admin tool, no carve-out, and no bootstrap path that quietly grants one.
+Actions that modify BROKKR's own control surface — the genome (tools, CBOM, AIBOM, **the model endpoint registry**), an invariant set, gate configuration, classification policy, **a channel-strength policy**, a tolerance grant, or activation of a learned detector — are `PrivilegeClass::SelfModifying`. They are costimulated like any other privileged action **and** require explicit DAP confirmation. There is no god-mode, no admin tool, no carve-out, and no bootstrap path that quietly grants one. **Registering a model endpoint is `SelfModifying`:** it changes where BROKKR's thinking happens and what may be sent there, and it is the most consequential configuration change in the system.
 
 **I-8 — Posture cannot fall by itself.**
 An `EscalationType` cannot be constructed without a resolution path and a baseline posture — the fields are not optional, so an escalation with no way down is not a thing this code can express (OQGF-P-8.1: *there are no one-way ratchets*). And above baseline, `ResolutionEngine::resolve` accepts only a DAP-confirmed decision; `may_resolve` returns `NeedsDapConfirmation`, never an autonomous clearance (OQGF-P-8.5). Autonomous signals may **raise** posture. Nothing autonomous lowers it. Where the system is uncertain, it stays escalated.
@@ -100,7 +102,13 @@ An `EscalationType` cannot be constructed without a resolution path and a baseli
 A `RefinedDetector` is `Heuristic` by construction. There is no path — no constructor, no conversion, no configuration — by which a learned artifact becomes, or modifies, a Deterministic Gate (OQGF-P-2). `MaturationPipeline::activate` returns `Err(FailsTolerance)` when the candidate raises host harm above the bound, **regardless of its detection gains** (OQGF-P-6.3), and `Err(NeedsApproval)` without DAP sign-off (OQGF-P-6.6). Additionally, `brokkr-adapt` SHALL NOT depend on `brokkr-reasoner`: **the agent does not teach itself.** BROKKR can learn to see better. It cannot learn to see less.
 
 **I-10 — No promotion without a signed genome.**
-No artifact is promotable without a present, signed CBOM and AIBOM free of disallowed algorithms (OQGF-G-4). This is a Deterministic Gate: fail-closed, non-suppressible, minted only by the genome gate, same pattern as `AuthorizedAction`. A model swap changes the AIBOM. A crypto change changes the CBOM. **Neither is an invisible configuration edit.**
+No artifact is promotable without a present, signed CBOM, AIBOM, **and model endpoint registry**, free of disallowed algorithms and with **no stale vendor trust score** (OQGF-G-4, OQGF-M-6). This is a Deterministic Gate: fail-closed, non-suppressible, minted only by the genome gate, same pattern as `AuthorizedAction`. A model swap changes the AIBOM. A crypto change changes the CBOM. An endpoint change changes the registry. **None is an invisible configuration edit.**
+
+**I-11 — One-sided TLS to a reasoner is not representable.**
+`ModelEndpoint::client_cert` is a required field, not an `Option` (OQGF-M-5). An endpoint that cannot present a client certificate cannot be constructed, so it cannot be registered, so it cannot be reached — not by a hurried maintainer, not by a config flag, not by a model. OQGF-M-5 says one-sided TLS SHALL NOT satisfy mutual authentication; BROKKR makes one-sided TLS a state the type system will not express. "Just use the public API with a bearer token" is not a shortcut available to anyone.
+
+**I-12 — An ungoverned context cannot reach a model.**
+`Reasoner::propose` takes a `ClearedContext`, which has no public constructor and is minted only by `brokkr-bifrost` after a successful HÚÐ evaluation against the endpoint's **effective** authorization (OQGF-I-8…I-15, OQGF-M-5). The reasoner is a `Destination`; its effective authorization is the *lesser* of its registry ceiling and what the *actually negotiated* key-exchange group can carry (read via `wolfSSL_get_curve_name`, never the offered list). A context above that level is a deterministic Deny and is not sent. This is the same structural device as `AuthorizedAction`, pointed at the model's input rather than its output.
 
 Each invariant gets at least one **negative test** whose name carries the invariant ID. The negative tests are the load-bearing tests in this repository. A positive test proves the system works; a negative test proves it cannot be made to misbehave. When time is short, the negative tests are the ones that stay.
 
@@ -130,6 +138,8 @@ You MAY draft a proposed amendment. You MAY NOT adopt one. **The model proposes;
 
 Any amendment you draft may only **add or tighten** a requirement. It may never relax, weaken, or carve an exception out of one. This is a hard guardrail with no exceptions. If the correct answer genuinely requires relaxing a requirement, say so and stop — that is a decision for a human, not a draft for you to write.
 
+**A recommendation that would unblock you SHALL be labeled as such.** When you recommend a disposition for a gap — declare `n.a.`, defer, add a hook — and that disposition happens to clear the blocker in front of you, say so in the report, in those terms: *this disposition unblocks me.* You are not forbidden from making it; the reading may well be correct. But your interest and your judgment coincide there, and the DAP weighs a self-serving recommendation differently from a disinterested one. Naming the coincidence is the point. This rule exists because a Phase 0.5 gap report recommended `n.a.` — the one disposition that clears a blocked build — for five of eight findings, correctly declining to act on them, but without flagging that the recommendation and the unblock pointed the same way.
+
 **Gaps do not announce themselves.** They are not found by reading the corpus; they are found by *checking the thing you are about to build against it*, requirement by requirement. That check is Section 5.3, and it is mandatory.
 
 Gap reports are recorded. Each becomes a dated file under `gaps/` (Section 8) and an entry in `gaps/INDEX.md`.
@@ -145,18 +155,21 @@ BROKKR is built **spine first, executor last**. This ordering is deliberate and 
 | Phase | Crate / work | Gate to the next phase |
 |---|---|---|
 | 0 | Readiness. Prove imports. Normalize structure. Build nothing. | *Complete — DAP approved* |
-| 0.5 | Re-readiness against Architecture Rev 1.1. Conformance check. Build nothing. | DAP approval |
-| 1 | `brokkr-core` — governance types; invariants I-1 … I-4, I-8 … I-10 encoded; negative tests | DAP review; all negative tests passing |
-| 2 | `brokkr-crypto` — wolfCrypt FFI; ML-DSA, **SLH-DSA**, HMAC-SHA-384, AES-256 | DAP review; FFI honesty rule verified |
+| 0.5 | Re-readiness + conformance check of BROKKR-ARCH Rev 1.1. Build nothing. | *Complete — build stopped on GAP-2026-07-14-001; disposed by Rev 1.2* |
+| 1 | `brokkr-core` — governance types; invariants I-1 … I-4, I-8 … I-12 encoded; negative tests | DAP review; all negative tests passing |
+| 2 | `brokkr-crypto` — wolfCrypt FFI; ML-DSA, **SLH-DSA**, **ML-KEM**, HMAC-SHA-384, AES-256-GCM | DAP review; FFI honesty rule verified |
 | 3 | `brokkr-intent` (SKULD) — IPC, attenuation, invariants, freshness | DAP review |
 | 4 | `brokkr-gate` (SINDRI) — the costimulation gate; `AuthorizedAction` minting | DAP review |
-| 5 | `brokkr-genome` (REGIN) — tool registry, **CBOM, AIBOM**, the OQGF-G-4 promotion gate | DAP review |
-| 6 | `brokkr-barrier` (HÚÐ) — egress Deny, ingress Quarantine, custody records, risk register | DAP review |
-| 7 | `brokkr-audit` (SAGA) — dual-signed append-only, re-signing, signed export | DAP review |
+| 5 | `brokkr-genome` (REGIN) — tool registry, **CBOM, AIBOM, endpoint registry, vendor trust scores**, the OQGF-G-4 promotion gate | DAP review |
+| 6 | `brokkr-barrier` (HÚÐ) — egress Deny, ingress Quarantine, custody records, risk register, uncontrolled-channel register | DAP review |
+| 7 | `brokkr-audit` (SAGA) — dual-signed append-only, chain self-verification, re-signing, signed export | DAP review |
 | 8 | `brokkr-sentinel` (HEIMDALL + **EIR**) — reconciliation, tolerance, host-harm monitor, resolution | DAP review |
+| **8.5** | **`brokkr-bifrost` (BIFRÖST)** — mTLS, negotiated-group readback, channel strength, HNDL scoring, `ClearedContext` minting | DAP review |
 | 9 | `brokkr-adapt` (**KVASIR**) — the maturation pipeline; four poisoning gates | DAP review |
 | 10 | `brokkr-reasoner` (MÍMIR) + `brokkr-tools` — the untrusted proposer and the tools | DAP review |
 | 11 | `brokkr-cli` — the orchestrator loop. The executor is wired **last**. | DAP review; hardening; functionality proof |
+
+**BIFRÖST is Phase 8.5, not later.** It depends on `brokkr-barrier` (it calls HÚÐ) and on `brokkr-crypto` (it reads the negotiated group), and `brokkr-reasoner` cannot be built without it (I-6, I-12). It therefore slots between the sentinel and the reasoner. Building the reasoner before the crossing that guards it would create, transiently, exactly the ungoverned model channel Rev 1.2 exists to close. The executor remains last.
 
 **No phase begins without explicit DAP approval of the previous phase.** Not "I'll do the next one while you review." Not "this is trivially small, I'll fold it in." Stop at the checkpoint, report, and wait.
 
@@ -187,7 +200,9 @@ For every normative requirement in scope for the phase, state four things:
 | Proof | The test that demonstrates it — **or that none exists** |
 | Verdict | `satisfied` \| `partial` \| `absent` \| `n.a. with justification` |
 
-**Scope for a phase** = every requirement the architecture's traceability table (BROKKR-ARCH §13) maps to a crate built in that phase, plus every Enhanced-level obligation the architecture declares applicable (BROKKR-ARCH §1.4). Anything `absent` is a gap report under Section 4, and the build stops.
+**Scope for a phase** = every requirement the architecture's traceability table (BROKKR-ARCH §14) maps to a crate built in that phase, plus every Enhanced-level obligation the architecture declares applicable (BROKKR-ARCH §1.4). Anything `absent` is a gap report under Section 4, and the build stops.
+
+**Enumerate from the corpus, not from the traceability table.** The requirements come from OQGF-1.0 and AMD-001…007 — the ground truth. The architecture's own traceability table is the *subject* of the audit, not its source; enumerating from it and checking it against itself is a circular audit, the exact shape that produced a false "100% coverage" claim once in this portfolio. This is not hypothetical guidance: the Phase 0.5 check found eight requirements that were absent from the architecture precisely because they were enumerated from the corpus and not from the table that omitted them.
 
 **Why this section exists. Read it — it is not boilerplate.**
 
@@ -223,9 +238,13 @@ Tests may use `unwrap`. Production code may not. Errors are values: `thiserror` 
 
 **No `unsafe`.** `#![forbid(unsafe_code)]` in every crate except `brokkr-crypto`, where FFI to wolfCrypt requires it. There, `unsafe` is confined to the thinnest possible FFI boundary layer, every `unsafe` block carries a `// SAFETY:` comment stating the invariant that makes it sound, and raw FFI types never escape the crate.
 
-**Cryptographic agility (OQGF-G-5).** No algorithm identifier is hard-coded. Signature and KEM selection go through a negotiation layer. An algorithm identifier is a typed enum, never a string.
+**Cryptographic agility (OQGF-G-5).** No algorithm identifier is hard-coded. Signature, KEM, and named-group selection go through a negotiation layer. An algorithm identifier is a typed enum, never a string.
 
-**Model agility.** No model identifier is hard-coded. The reasoner is configuration, resolved at startup, behind the `Reasoner` trait, and **declared in the AIBOM**. This is the reasoning analog of cryptographic agility, and it is a requirement, not a preference.
+**At-rest confidentiality is PQC from first commit.** Any AES-256 key protecting data at rest (SAGA records, REGIN key material) is established under **ML-KEM**, never RSA/ECDH-derived. This is not a migration target. Per the Mosca calculation in BROKKR-ARCH §6.11 — required secrecy lifetime 7 years, migration 1 year, CRQC default 2030 — the inequality is *already* violated for anything encrypted today under a classically-protected key. There is no window in which a classically-established at-rest key is acceptable.
+
+**Channel strength is read, never assumed.** Where BROKKR negotiates TLS to a model endpoint (BIFRÖST), the negotiated key-exchange group is read from the live connection (`wolfSSL_get_curve_name`) and drives the endpoint's effective authorization. The offered cipher list is an intention; only the negotiated group is a fact, and only facts reach the gate. Enhanced targets `X25519MLKEM768` (group 4588); High-Assurance targets `SECP384R1MLKEM1024` (group 4589). Draft `_OLD` codepoints are a finding, not a pass.
+
+**Model agility.** No model identifier is hard-coded. The reasoner is configuration, resolved at startup, behind the `Reasoner` trait, **declared in the AIBOM**, and reached only through a registered endpoint. This is the reasoning analog of cryptographic agility, and it is a requirement, not a preference. **Substitutability is not trustworthiness:** the OQGF-M-6 vendor trust score is assessed independently of whether a provider can be swapped, and is gate-blocking when stale.
 
 **Dependencies.** Every new crate is a supply-chain decision. **Ask before adding one.** State what it does, why nothing in the existing tree covers it, and what its transitive footprint is. `cargo-audit`, `cargo-deny`, and `cargo-vet` run in CI and must pass. `cargo-cyclonedx` feeds the CBOM.
 
@@ -235,7 +254,7 @@ Tests may use `unwrap`. Production code may not. Errors are values: `thiserror` 
 
 ## 7. Testing, verification, and honesty
 
-**Every normative requirement gets a test.** Test names carry the requirement ID: `test_oqgf_m_11_identity_alone_yields_anergy`, `test_oqgf_p_2_tolerance_grant_on_deterministic_gate_is_refused`, `test_i3_attenuate_rejects_broadening`, `test_i8_escalation_without_resolution_path_is_unconstructable`, `test_i9_refined_detector_cannot_be_deterministic`. If a requirement has no test, it is not implemented, regardless of what the code appears to do.
+**Every normative requirement gets a test.** Test names carry the requirement ID: `test_oqgf_m_11_identity_alone_yields_anergy`, `test_oqgf_p_2_tolerance_grant_on_deterministic_gate_is_refused`, `test_i3_attenuate_rejects_broadening`, `test_i8_escalation_without_resolution_path_is_unconstructable`, `test_i9_refined_detector_cannot_be_deterministic`, `test_i11_endpoint_without_client_cert_is_unconstructable`, `test_i12_raw_context_cannot_reach_reasoner`. If a requirement has no test, it is not implemented, regardless of what the code appears to do.
 
 **Verification uses independent ground truth.** A scanner may not be verified against its own inventory. That is a circular audit and it has already produced a false "100% coverage" claim once in this portfolio. Ground truth comes from outside the tool being tested — a hand-built fixture, an independent parser, a known-answer test vector — never from the tool's own output.
 
@@ -249,7 +268,8 @@ Tests may use `unwrap`. Production code may not. Errors are values: `thiserror` 
 
 - wolfSSL **v5.9.2-stable**, from the public repository.
 - **The build in use is stock and non-FIPS.** Zero FIPS symbols. It is fine to develop against. It would be a **false CBOM entry** to record it as FIPS 140-3 validated, and BROKKR SHALL NOT do so.
-- **SLH-DSA is natively available** (`wolfcrypt/src/wc_slhdsa.c`; `--enable-slhdsa`; six parameter sets) and **not enabled in the current build.** A rebuild is a Phase 2 prerequisite, not an architecture conflict.
+- **SLH-DSA is natively available** (`wolfcrypt/src/wc_slhdsa.c`; `--enable-slhdsa` / `-DWOLFSSL_SLHDSA=yes`; six parameter sets) and **not enabled in the current build.** A rebuild is a Phase 2 prerequisite, not an architecture conflict.
+- **ML-KEM is compiled into the current build** (46 symbols), with standards-track hybrid TLS groups present: `X25519MLKEM768` (4588) and `SECP384R1MLKEM1024` (4589). Negotiated-group readback is available via `wolfSSL_get_curve_name`. The HNDL sentinel is buildable, not hypothetical.
 - **SLH-DSA is required at Enhanced.** OQGF-R-1 requires dual PQC families for audit signatures, and SAGA is an audit spine. This is not a High-Assurance deferral.
 
 The only correct statement of posture is: **CNSA-2.0-aligned; FIPS module validation pending; current build non-FIPS.** Never write, log, print, or document anything stronger.
@@ -305,6 +325,7 @@ Each directory carries an `INDEX.md` with a table tracking every record: date, r
 13. Never register an escalation with no declared way down.
 14. Never let anything learned be, or modify, a deterministic gate.
 15. Never report zero findings without stating what you checked and against what.
+16. Never send a context to a model without a `ClearedContext` from BIFRÖST, and never register a model endpoint that cannot do mutual TLS.
 
 When any of these come into conflict with finishing the task, **the task loses.** Report the conflict and stop. That is not a failure to build; it is the system working.
 
@@ -329,6 +350,18 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.4 — 14 July 2026.** Aligns the build rules to Architecture Rev 1.2, which disposed the eight ABSENT findings of GAP-2026-07-14-001. The central finding was that MÍMIR bypassed HÚÐ: the context shipped to the reasoner on every hop — the largest egress path in the system — passed no gate, because the model was modeled as a trait and not as a network destination. Every change here adds or tightens; nothing is relaxed.
+
+- **Section 2** makes the prime directive explicitly bidirectional: it governs the model's input as well as its output, and the context sent to the reasoner crosses the barrier like any other crossing.
+- **Section 3** adds two structural invariants. **I-11** — one-sided TLS to a reasoner is not representable: `ModelEndpoint::client_cert` is a required field, so an endpoint that cannot do mutual TLS cannot be constructed (OQGF-M-5). **I-12** — an ungoverned context cannot reach a model: `Reasoner::propose` takes a `ClearedContext` mintable only by BIFRÖST after a HÚÐ evaluation against the endpoint's effective authorization, which is the lesser of its registry ceiling and its negotiated channel strength (OQGF-I-8…I-15, OQGF-M-5). I-5 and I-6 are extended to place `brokkr-bifrost` as a governance crate through which every model call passes; I-7 is extended to make endpoint registration and channel-strength policy `SelfModifying`; I-10 is extended to require a signed endpoint registry and a non-stale vendor trust score for promotion (OQGF-M-6).
+- **Section 4** adds the rule that a recommendation which would unblock the recommender SHALL be labeled as such. Motivated by the Phase 0.5 gap report, which recommended `n.a.` — the disposition that clears a blocked build — for five of eight findings, correctly declining to act but without flagging that its recommendation and its unblock pointed the same way.
+- **Section 5.1** inserts **Phase 8.5 (`brokkr-bifrost` / BIFRÖST)** between the sentinel and the reasoner: it depends on the barrier and the crypto backend, and the reasoner cannot be built without it (I-6, I-12). Building the reasoner before its crossing would create a transient ungoverned model channel. The executor remains last. Phase 1 now encodes I-8…I-12; Phase 2 names ML-KEM alongside SLH-DSA; Phase 5 names the endpoint registry and vendor trust scores; Phase 7 names SAGA's chain self-verification. Phases 0 and 0.5 are marked complete.
+- **Section 5.3** states explicitly that requirements are enumerated from the corpus, never from the architecture's own traceability table, and records that the Phase 0.5 check found its eight ABSENT requirements precisely because it did so. The traceability-table cross-reference is corrected to BROKKR-ARCH §14 (was §13 before Rev 1.2 renumbered).
+- **Section 6** adds two standards: at-rest confidentiality keys are ML-KEM-established from first commit (the Mosca inequality is already violated for a classically-protected key encrypted today), and channel strength is read from the live connection, never assumed. Model agility is extended to note that substitutability is not trustworthiness (OQGF-M-6).
+- **Section 7** adds the I-11 and I-12 negative tests to the naming examples and records that ML-KEM is compiled into the current build with hybrid groups present and negotiated-group readback available.
+- **Section 10** adds hard-list item 16.
+- **Section 11 (Auto memory boundary) is unchanged in content.** It remains Section 11; the change log remains Section 12.
 
 **v1.3 — 14 July 2026.** Adds the checkpoint-commit rule to Section 5.2. Every approved checkpoint ends in a commit; a phase is not complete until its artifacts are committed and pushed; builder work and DAP-placed specification changes are separate commits, never mixed; and a revision to `CLAUDE.md` or the architecture is committed before any work begins under it, so git records which version each phase was built against. Motivated by a real near-loss: v1.1 was overwritten before being committed and survived only because it was carried forward by hand. The rule adds a constraint and relaxes nothing, so it is a permitted auto-draft under Section 4. Also corrects the Section 5.2 cross-reference to auto memory from §12 to §11. No other section changed; no requirement relaxed.
 
