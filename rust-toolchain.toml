@@ -1,0 +1,5 @@
+# Pinned toolchain (CLAUDE.md 6). All builds use --locked; Cargo.lock is committed.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,16 @@
+[package]
+name = "brokkr-core"
+description = "BROKKR governance types: the deterministic spine's invariants, encoded so a violation does not compile. no_std, zero dependencies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# Zero dependencies by deliberate choice (Phase 1). Cryptography is a trait seam
+# here; brokkr-crypto (Phase 2) implements it against wolfCrypt. brokkr-core SHALL
+# NOT depend on brokkr-crypto or any C library (I-5).
+[dependencies]
+# CLAUDE.md 6 clippy denies are set as crate-level inner attributes in src/lib.rs
+# (lib target only), so integration tests and doctests — separate crates — remain
+# free to use unwrap/panic as the prompt permits.

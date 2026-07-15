@@ -1,0 +1,14 @@
+# BROKKR Cargo workspace.
+# Spine-first, executor-last (CLAUDE.md 5.1). Members are added phase by phase;
+# brokkr-core is Phase 1. No member depends on brokkr-reasoner/brokkr-tools/brokkr-cli
+# (I-5), and the dependency direction is one-way.
+[workspace]
+resolver = "3"
+members = ["brokkr-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+authors = ["Odin's LLC"]
+rust-version = "1.94"
