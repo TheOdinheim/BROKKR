@@ -91,6 +91,30 @@ in Phase 2 stands; this risk covers only what Phase 2 explicitly could not guara
 
 ---
 
+## RISK-2026-0003 — brokkr-crypto has no public-key-only verifier (DualPublicKey) (OQGF-M-8)
+
+| Field | Value |
+| --- | --- |
+| **id** | RISK-2026-0003 |
+| **source** | `RiskSource::ThreatModel` (Phase 3 conformance finding, `CONF-2026-07-16-P3-R1.md`; M-8 corrected from satisfied to partial) |
+| **description** | `brokkr-crypto`'s only keypair constructor is `DualKeyPair::generate()`, which mints **private** key material; `verify_dual` is a method on the full keypair. No type holds a verify-only public key. `verify_chain` (`brokkr-intent`) therefore cannot verify a chain using only public roots of trust — it needs the signer's keypair, so verification is demonstrated only as *signer-verifies-own-signature*. |
+| **context** | OQGF-M-8's "a verifier SHALL be able to reconstruct the complete chain … using only declared public roots of trust" is only **partially** satisfied at Phase 3: the record-and-reconstruct half is done and tested; the public-roots-of-trust half is not yet reachable. This is a **HARD PREREQUISITE for Phase 4** (SINDRI verifies chains it did **not** sign, using public keys derived from OQGF-M-1 attestations). It is a missing type in `brokkr-crypto`, not a defect in `brokkr-intent`. |
+| **likelihood** | `Likelihood::AlmostCertain` (without the type, Phase 4 verification-by-public-key cannot be built — the gap is certain to be hit) |
+| **impact** | `Impact::Major` (blocks the costimulation gate's core Signal-2 verification and the OQGF-M-8 public-roots-of-trust obligation) |
+| **owner** | Jeremy Rose (DAP) |
+| **disposition** | `Disposition::Reduce` |
+| **plan.owner** | Jeremy Rose |
+| **plan.target** | Phase 4 prerequisite (before SINDRI verifies chains it did not sign) |
+| **plan.status** | `TreatmentStatus::Open` |
+| **mitigation** | Add a `DualPublicKey` type to `brokkr-crypto` (or `from_public_bytes` + a verify path independent of the private keypair), so `verify_chain` and SINDRI can verify with public roots of trust only. Not an amendment-gap — the framework is clear; the type is missing. |
+| **residual (required by type)** | After the type is added: verification uses public roots of trust. Residual = the *provenance* of those public keys still depends on OQGF-M-1 attestation (HW root of trust) being valid — a bounded dependency verified at the gate (Phase 4), re-assessed when SINDRI wires attestation→public-key. Residual `likelihood: Unlikely`, `impact: Major`. |
+
+**Provenance note:** Raised by the Phase 3 records correction. The Phase 3 chain cryptography
+(canonical serialization, dual-family signing, hash-linking, freshness) stands and is tested;
+this risk covers only the verifier-side key material that `brokkr-crypto` does not yet expose.
+
+---
+
 ## Register discipline (OQGF-P-10.6)
 
 - **Never delete.** A closed, superseded, or re-dispositioned entry is struck through with a

@@ -5,3 +5,7 @@
 *.key
 desktop.ini
 Thumbs.db
+
+# workspace-local wolfSSL rpath convenience (hard-codes an absolute dev path,
+# /home/jerem/wolfssl/build); machine-specific, not committed.
+.cargo/config.toml

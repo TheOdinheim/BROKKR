@@ -1,0 +1,14 @@
+[package]
+name = "brokkr-intent"
+description = "SKULD — the Intent Provenance Chain (AMD-001). Real dual-family signing, hash-linking, freshness, and cryptographically-enforced monotonic attenuation over brokkr-core's append-only chain. Pure logic, no unsafe."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Depends ONLY on brokkr-core (the types) and brokkr-crypto (the signing/hashing).
+# I-5: it must NOT depend on brokkr-reasoner/brokkr-tools/brokkr-cli. I-6: no model calls.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }

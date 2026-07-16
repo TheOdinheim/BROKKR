@@ -14,3 +14,4 @@ to, never rewritten.
 | 2026-07-15 | DELTA-R1 | 1 | `brokkr-core` vs AMD-008/AMD-009 (OQGF-P-10, P-11) | Type-level delta: A/B/C sort of all 13 new requirements | 0 (A) | — | 5 (bucket B) | 8 (bucket C) | [CONF-2026-07-15-P1-DELTA-R1.md](CONF-2026-07-15-P1-DELTA-R1.md) |
 | 2026-07-15 | DELTA-R2 | 1 | `brokkr-core` vs AMD-008/009, POST-BUILD | Re-sort with types real; file:line citations; build/test/clippy output | 6 (A, core-shape) | — | 0 | 7 (bucket C, Phase 2/5/6/7) | [CONF-2026-07-15-P1-DELTA-R2.md](CONF-2026-07-15-P1-DELTA-R2.md) |
 | 2026-07-15 | R1 | 2 | Built crate `brokkr-crypto` (wolfCrypt FFI) | G-1, G-5, R-1, R-4, G-7, P-11.5 crypto-shred — real round-trips vs the real .so | 4 | 2 | 0 | — | [CONF-2026-07-15-P2-R1.md](CONF-2026-07-15-P2-R1.md) |
+| 2026-07-16 | R1 | 3 | Built crate `brokkr-intent` (SKULD) | AMD-001 §AMD.1 M-8…M-14 (quoted) + P-10/P-11 n.a.; real dual-family chain | 2 | 3 | 0 | 4 | [CONF-2026-07-16-P3-R1.md](CONF-2026-07-16-P3-R1.md) |
