@@ -1,0 +1,16 @@
+[package]
+name = "brokkr-crypto"
+description = "wolfCrypt FFI backend implementing the brokkr-core crypto traits (ML-DSA, SLH-DSA, ML-KEM, SHA-384, AES-256-GCM). The sole crate permitted unsafe, confined to src/ffi.rs. Non-FIPS build."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+# Declares the native library this crate links, so only one crate links wolfssl.
+links = "wolfssl"
+
+[dependencies]
+# Implements the brokkr-core traits. Direction is one-way: core never depends on
+# crypto (I-5). No crypto crate from crates.io — the point is binding the ONE
+# verified wolfCrypt, not pulling a second implementation.
+brokkr-core = { path = "../brokkr-core" }
