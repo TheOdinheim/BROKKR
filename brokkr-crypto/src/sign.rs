@@ -145,4 +145,60 @@ impl DualKeyPair {
             Err(CryptoError::VerificationFailed)
         }
     }
+
+    /// Export this keypair's raw public keys `(ml_dsa_65, slh_dsa_shake_192s)`, for a
+    /// signer to publish so a verifier can later check its signatures with a
+    /// [`DualPublicKey`] holding no private material.
+    pub fn public_key_bytes(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        let mldsa = self
+            .mldsa
+            .export_public()
+            .map_err(|_| CryptoError::Backend)?;
+        let slhdsa = self
+            .slhdsa
+            .export_public()
+            .map_err(|_| CryptoError::Backend)?;
+        Ok((mldsa, slhdsa))
+    }
+}
+
+/// A **verify-only** dual-family public key: ML-DSA-65 + SLH-DSA-SHAKE-192s, holding
+/// **no** private material. This is what a verifier — SINDRI (Phase 4), or a
+/// public-roots-of-trust chain verifier — uses to check a `DualSignature` it did not
+/// produce, given public keys sourced from an OQGF-M-1 attestation. It closes the
+/// public-roots-of-trust half of OQGF-M-8.
+pub struct DualPublicKey {
+    mldsa: ffi::MlDsa65Public,
+    slhdsa: ffi::SlhDsaShake192sPublic,
+}
+
+impl DualPublicKey {
+    /// Import raw ML-DSA-65 and SLH-DSA-SHAKE-192s public keys. Length-validated per
+    /// family in the FFI layer; a wrong-length key fails closed with
+    /// `CryptoError::MalformedKey`.
+    pub fn from_public_bytes(mldsa_pub: &[u8], slhdsa_pub: &[u8]) -> Result<Self, CryptoError> {
+        let mldsa = ffi::MlDsa65Public::from_public_bytes(mldsa_pub)
+            .map_err(|_| CryptoError::MalformedKey)?;
+        let slhdsa = ffi::SlhDsaShake192sPublic::from_public_bytes(slhdsa_pub)
+            .map_err(|_| CryptoError::MalformedKey)?;
+        Ok(DualPublicKey { mldsa, slhdsa })
+    }
+
+    /// Verify a `DualSignature` with public keys only. Returns `Ok(())` **only if BOTH
+    /// families verify** — mirrors [`DualKeyPair::verify_dual`] exactly (algorithm-
+    /// mismatch check first, then both families).
+    pub fn verify_dual(&self, msg: &[u8], dual: &DualSignature) -> Result<(), CryptoError> {
+        if dual.lattice.alg != SignatureAlg::MlDsa65
+            || dual.hash_based.alg != SignatureAlg::SlhDsaShake192s
+        {
+            return Err(CryptoError::AlgorithmMismatch);
+        }
+        let lattice_ok = self.mldsa.verify(msg, &dual.lattice.bytes);
+        let hash_ok = self.slhdsa.verify(msg, &dual.hash_based.bytes);
+        if lattice_ok && hash_ok {
+            Ok(())
+        } else {
+            Err(CryptoError::VerificationFailed)
+        }
+    }
 }

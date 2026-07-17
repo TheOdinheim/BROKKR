@@ -105,13 +105,30 @@ in Phase 2 stands; this risk covers only what Phase 2 explicitly could not guara
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
 | **plan.target** | Phase 4 prerequisite (before SINDRI verifies chains it did not sign) |
-| **plan.status** | `TreatmentStatus::Open` |
-| **mitigation** | Add a `DualPublicKey` type to `brokkr-crypto` (or `from_public_bytes` + a verify path independent of the private keypair), so `verify_chain` and SINDRI can verify with public roots of trust only. Not an amendment-gap — the framework is clear; the type is missing. |
+| **plan.status** | ~~`TreatmentStatus::Open`~~ → **`TreatmentStatus::Executed`** (17 Jul 2026, Phase 2 revision — see UPDATE below) |
+| **mitigation** | Add a `DualPublicKey` type to `brokkr-crypto` (`from_public_bytes` + a verify path independent of the private keypair), so `verify_chain` and SINDRI can verify with public roots of trust only. Not an amendment-gap — the framework is clear; the type is missing. |
 | **residual (required by type)** | After the type is added: verification uses public roots of trust. Residual = the *provenance* of those public keys still depends on OQGF-M-1 attestation (HW root of trust) being valid — a bounded dependency verified at the gate (Phase 4), re-assessed when SINDRI wires attestation→public-key. Residual `likelihood: Unlikely`, `impact: Major`. |
+
+**UPDATE — 17 July 2026 (Phase 2 revision, `reports/PHASE-2-REV-2026-07-17-R1.md`):** the
+missing type now **EXISTS**. `brokkr-crypto` gained `DualPublicKey` (verify-only, no private
+material) with `from_public_bytes` (length-validated, fail-closed import — 1952 B ML-DSA-65,
+48 B SLH-DSA-SHAKE-192s) and `verify_dual` (both families required), plus
+`DualKeyPair::public_key_bytes` to export raw public keys. Public-key-only verification is
+proven by `test_oqgf_m_8_public_key_only_verification` (`CONF-2026-07-17-P2-REV-R1.md`). **The
+Phase 4 prerequisite is MET and the blocker is removed.** Per OQGF-P-10.5 the
+`Disposition::Reduce` plan is now **Executed** and the residual is re-dispositioned:
+
+- **Residual (re-dispositioned, OPEN — Phase 4):** `brokkr-intent`'s `verify_chain` still
+  takes a `DualKeyPair`; switching it to `DualPublicKey` with attestation-sourced public keys
+  is **Phase 4** (SINDRI), and the *provenance* of those keys depends on OQGF-M-1 attestation.
+  Residual `likelihood: Unlikely`, `impact: Major`, target **Phase 4**, status **Open**. The
+  risk is *reduced* (the type exists) but **not closed** until the wiring lands. OQGF-M-8 in
+  `CONF-2026-07-16-P3-R1` stays **partial** until then.
 
 **Provenance note:** Raised by the Phase 3 records correction. The Phase 3 chain cryptography
 (canonical serialization, dual-family signing, hash-linking, freshness) stands and is tested;
-this risk covers only the verifier-side key material that `brokkr-crypto` does not yet expose.
+this risk covered the verifier-side key material `brokkr-crypto` did not yet expose — now
+added by this revision, with the wiring residual carried forward to Phase 4.
 
 ---
 

@@ -45,6 +45,10 @@ const WC_ML_KEM_768: c_int = 1; // wc_mlkem.h (probed)
 pub const MLDSA65_SIG_SIZE: usize = 3309;
 /// SHA-384 digest size.
 pub const SHA384_DIGEST_SIZE: usize = 48;
+/// ML-DSA-65 public-key size (WC_MLDSA_65_PUB_KEY_SIZE; probed = 1952).
+pub const MLDSA65_PUB_SIZE: usize = 1952;
+/// SLH-DSA-SHAKE-192s public-key size (wc_SlhDsaKey_PublicSizeFromParam; probed = 48).
+pub const SLHDSA192S_PUB_SIZE: usize = 48;
 
 // --- Opaque, heap-allocated key types (only ever used behind a pointer) ---
 #[repr(C)]
@@ -85,6 +89,9 @@ unsafe extern "C" {
     fn wc_MlDsaKey_SetParams(key: *mut WcMlDsaKey, level: Byte) -> c_int;
     fn wc_MlDsaKey_MakeKey(key: *mut WcMlDsaKey, rng: *mut WcRng) -> c_int;
     fn wc_MlDsaKey_SigSize(key: *mut WcMlDsaKey) -> c_int;
+    fn wc_MlDsaKey_ExportPubRaw(key: *mut WcMlDsaKey, out: *mut Byte, outLen: *mut Word32)
+    -> c_int;
+    fn wc_MlDsaKey_ImportPubRaw(key: *mut WcMlDsaKey, in_: *const Byte, inLen: Word32) -> c_int;
     fn wc_MlDsaKey_SignCtx(
         key: *mut WcMlDsaKey,
         ctx: *const Byte,
@@ -116,6 +123,12 @@ unsafe extern "C" {
     fn wc_SlhDsaKey_Free(key: *mut SlhDsaKeyBuf);
     fn wc_SlhDsaKey_MakeKey(key: *mut SlhDsaKeyBuf, rng: *mut WcRng) -> c_int;
     fn wc_SlhDsaKey_SigSize(key: *mut SlhDsaKeyBuf) -> c_int;
+    fn wc_SlhDsaKey_ExportPublic(
+        key: *mut SlhDsaKeyBuf,
+        out: *mut Byte,
+        outLen: *mut Word32,
+    ) -> c_int;
+    fn wc_SlhDsaKey_ImportPublic(key: *mut SlhDsaKeyBuf, in_: *const Byte, inLen: Word32) -> c_int;
     fn wc_SlhDsaKey_Sign(
         key: *mut SlhDsaKeyBuf,
         ctx: *const Byte,
@@ -431,6 +444,19 @@ impl MlDsa65 {
         };
         ret == 0 && res == 1
     }
+
+    /// Export the raw ML-DSA-65 public key (1952 bytes) for a signer to publish.
+    pub fn export_public(&self) -> Result<Vec<u8>, i32> {
+        let mut out = vec![0u8; MLDSA65_PUB_SIZE];
+        let mut out_len = out.len() as Word32;
+        // SAFETY: self.ptr is a live keypair (holds the public part after MakeKey); out
+        // is MLDSA65_PUB_SIZE bytes with out_len its capacity (updated to the actual
+        // length written).
+        let ret = unsafe { wc_MlDsaKey_ExportPubRaw(self.ptr, out.as_mut_ptr(), &mut out_len) };
+        check(ret)?;
+        out.truncate(out_len as usize);
+        Ok(out)
+    }
 }
 
 impl Drop for MlDsa65 {
@@ -515,6 +541,19 @@ impl SlhDsaShake192s {
             )
         };
         ret == 0
+    }
+
+    /// Export the raw SLH-DSA-SHAKE-192s public key (48 bytes) for a signer to publish.
+    pub fn export_public(&self) -> Result<Vec<u8>, i32> {
+        let p = &*self.buf as *const SlhDsaKeyBuf as *mut SlhDsaKeyBuf;
+        let mut out = vec![0u8; SLHDSA192S_PUB_SIZE];
+        let mut out_len = out.len() as Word32;
+        // SAFETY: p is a live, initialized key (holds the public part after MakeKey); out
+        // is SLHDSA192S_PUB_SIZE bytes with out_len its capacity.
+        let ret = unsafe { wc_SlhDsaKey_ExportPublic(p, out.as_mut_ptr(), &mut out_len) };
+        check(ret)?;
+        out.truncate(out_len as usize);
+        Ok(out)
     }
 }
 
@@ -614,5 +653,131 @@ impl MlKem768 {
 impl Drop for MlKem768 {
     fn drop(&mut self) {
         self.destroy();
+    }
+}
+
+/// A **verify-only** ML-DSA-65 public key — holds no private material. Built by
+/// importing raw public-key bytes (e.g. from an OQGF-M-1 attestation).
+pub struct MlDsa65Public {
+    ptr: *mut WcMlDsaKey,
+}
+
+// SAFETY: exclusive ownership of an opaque public-only key; no Rust-visible pointee
+// fields; single-threaded use.
+unsafe impl Send for MlDsa65Public {}
+unsafe impl Sync for MlDsa65Public {}
+
+impl MlDsa65Public {
+    /// Import a raw ML-DSA-65 public key. **Fail-closed** on a wrong length: a malformed
+    /// attestation key must not sail through.
+    pub fn from_public_bytes(pubkey: &[u8]) -> Result<Self, i32> {
+        if pubkey.len() != MLDSA65_PUB_SIZE {
+            return Err(-100); // malformed key: wrong public-key length
+        }
+        // SAFETY: New allocates the opaque key (checked for NULL). SetParams(65) so the
+        // raw bytes are interpreted as ML-DSA-65, then ImportPubRaw loads the public key.
+        let ptr = unsafe { wc_MlDsaKey_New(ptr::null_mut(), -2) };
+        if ptr.is_null() {
+            return Err(-1);
+        }
+        let me = MlDsa65Public { ptr };
+        // SAFETY: me.ptr live; pubkey is exactly MLDSA65_PUB_SIZE bytes.
+        unsafe {
+            check(wc_MlDsaKey_SetParams(me.ptr, WC_ML_DSA_65))?;
+            check(wc_MlDsaKey_ImportPubRaw(
+                me.ptr,
+                pubkey.as_ptr(),
+                pubkey.len() as Word32,
+            ))?;
+        }
+        Ok(me)
+    }
+
+    /// Verify with the imported public key. `true` iff valid; any non-success is
+    /// not-verified (fail-closed).
+    pub fn verify(&self, msg: &[u8], sig: &[u8]) -> bool {
+        let mut res: c_int = 0;
+        // SAFETY: self.ptr is a live public key; sig/msg valid slices; res a valid
+        // out-param; ctx=NULL/0 matches signing.
+        let ret = unsafe {
+            wc_MlDsaKey_VerifyCtx(
+                self.ptr,
+                sig.as_ptr(),
+                sig.len() as Word32,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len() as Word32,
+                &mut res,
+            )
+        };
+        ret == 0 && res == 1
+    }
+}
+
+impl Drop for MlDsa65Public {
+    fn drop(&mut self) {
+        let mut p = self.ptr;
+        // SAFETY: self.ptr came from wc_MlDsaKey_New; Delete frees it once.
+        unsafe { wc_MlDsaKey_Delete(self.ptr, &mut p) };
+    }
+}
+
+/// A **verify-only** SLH-DSA-SHAKE-192s public key — holds no private material.
+pub struct SlhDsaShake192sPublic {
+    buf: Box<SlhDsaKeyBuf>,
+}
+
+// SAFETY: as SlhDsaShake192s — exclusive ownership, opaque pointee, single-threaded use.
+unsafe impl Send for SlhDsaShake192sPublic {}
+unsafe impl Sync for SlhDsaShake192sPublic {}
+
+impl SlhDsaShake192sPublic {
+    /// Import a raw SLH-DSA-SHAKE-192s public key. **Fail-closed** on a wrong length.
+    pub fn from_public_bytes(pubkey: &[u8]) -> Result<Self, i32> {
+        if pubkey.len() != SLHDSA192S_PUB_SIZE {
+            return Err(-100);
+        }
+        let me = SlhDsaShake192sPublic {
+            buf: Box::new(SlhDsaKeyBuf([0u8; 1024])),
+        };
+        let p = &*me.buf as *const SlhDsaKeyBuf as *mut SlhDsaKeyBuf;
+        // SAFETY: p is a 1024-byte 16-aligned buffer >= sizeof(SlhDsaKey)=984. Init sets
+        // the SHAKE-192s param, then ImportPublic loads the public key. Free in Drop.
+        // pubkey is exactly SLHDSA192S_PUB_SIZE bytes.
+        unsafe {
+            check(wc_SlhDsaKey_Init(p, SLHDSA_SHAKE192S, ptr::null_mut(), -2))?;
+            check(wc_SlhDsaKey_ImportPublic(
+                p,
+                pubkey.as_ptr(),
+                pubkey.len() as Word32,
+            ))?;
+        }
+        Ok(me)
+    }
+
+    pub fn verify(&self, msg: &[u8], sig: &[u8]) -> bool {
+        let p = &*self.buf as *const SlhDsaKeyBuf as *mut SlhDsaKeyBuf;
+        // SAFETY: p is a live public key; msg/sig valid slices. Verify returns 0 iff valid.
+        let ret = unsafe {
+            wc_SlhDsaKey_Verify(
+                p,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len() as Word32,
+                sig.as_ptr(),
+                sig.len() as Word32,
+            )
+        };
+        ret == 0
+    }
+}
+
+impl Drop for SlhDsaShake192sPublic {
+    fn drop(&mut self) {
+        let p = &mut *self.buf as *mut SlhDsaKeyBuf;
+        // SAFETY: p is the live key initialized in from_public_bytes; Free runs once.
+        unsafe { wc_SlhDsaKey_Free(p) };
     }
 }

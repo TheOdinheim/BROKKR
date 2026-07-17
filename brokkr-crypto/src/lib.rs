@@ -36,7 +36,7 @@ pub mod sign;
 
 pub use hash::Sha384Hasher;
 pub use shred::{SubjectKey, WrappedKey};
-pub use sign::{DualKeyPair, MlDsaSigner, SlhDsaSigner};
+pub use sign::{DualKeyPair, DualPublicKey, MlDsaSigner, SlhDsaSigner};
 
 /// The only correct statement of cryptographic posture for this build (CLAUDE.md §7,
 /// BROKKR-ARCH §9). Never write, log, or document anything stronger.
