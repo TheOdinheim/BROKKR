@@ -15,13 +15,15 @@
 //! ("CNSA-2.0-aligned; FIPS module validation pending; current build non-FIPS").
 
 use crate::canonical;
-use brokkr_core::crypto::{Attestation, Digest, DualSignature, Hasher, Signature, SignatureAlg};
+use brokkr_core::crypto::{
+    Attestation, CryptoError, Digest, DualSignature, Hasher, Signature, SignatureAlg,
+};
 use brokkr_core::ids::{Dap, Nonce, SubjectId, Timestamp};
 use brokkr_core::intent::{
     AttenuationError, Caveat, IntentChain, IntentChainEntry, IntentProvenanceChain, IntentScope,
     InvariantSet, RootIntent,
 };
-use brokkr_crypto::{DualKeyPair, Sha384Hasher};
+use brokkr_crypto::{DualKeyPair, DualPublicKey, Sha384Hasher};
 
 /// Errors from constructing or verifying an intent provenance chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +90,93 @@ fn digest(bytes: &[u8]) -> Digest {
     Sha384Hasher.hash(bytes)
 }
 
+/// A private, brokkr-intent-internal abstraction over "something that can verify a
+/// dual-family signature": either a full [`DualKeyPair`] (holds private material) or a
+/// [`DualPublicKey`] (public roots of trust only). Both already expose an inherent
+/// `verify_dual` with the identical shape; these impls are one-line forwards. Keeping
+/// the verification *walk* generic over this trait means the freshness / hash-link /
+/// subset / error-mapping logic lives in exactly one place — the keypair path and the
+/// public-key path cannot drift. This trait is **private**; it is not part of the API.
+trait DualVerify {
+    fn verify_dual(&self, msg: &[u8], sig: &DualSignature) -> Result<(), CryptoError>;
+}
+
+impl DualVerify for DualKeyPair {
+    fn verify_dual(&self, msg: &[u8], sig: &DualSignature) -> Result<(), CryptoError> {
+        // Inherent method (takes precedence over the trait method for `Type::method`).
+        DualKeyPair::verify_dual(self, msg, sig)
+    }
+}
+
+impl DualVerify for DualPublicKey {
+    fn verify_dual(&self, msg: &[u8], sig: &DualSignature) -> Result<(), CryptoError> {
+        DualPublicKey::verify_dual(self, msg, sig)
+    }
+}
+
+/// Verify a Root Intent signature with any dual verifier — the single place root-sig
+/// verification lives. `verify_root` and `verify_root_public` both delegate here, as
+/// does the chain walk.
+fn check_root_signature<V: DualVerify>(root: &RootIntent, verifier: &V) -> Result<(), IntentError> {
+    let bytes = canonical::root_signed_content(root);
+    verifier
+        .verify_dual(&bytes, &root.signature)
+        .map_err(|_| IntentError::RootSignatureInvalid)
+}
+
+/// The chain-verification walk, generic over the verifier type — the **one** place the
+/// freshness → root-sig → per-hop(hash-link, subset re-check, entry-sig) → advance logic
+/// lives. Both [`Skuld::verify_chain`] (keypairs) and [`Skuld::verify_chain_public`]
+/// (public keys) delegate here, so they cannot drift. Same error variants, same order,
+/// same fail-closed behavior — only the verifying-key type differs.
+fn verify_chain_with<V: DualVerify>(
+    root: &RootIntent,
+    entries: &[IntentChainEntry],
+    root_verifier: &V,
+    hop_verifiers: &[&V],
+    now: Timestamp,
+) -> Result<(), IntentError> {
+    // 1. Freshness, at the start, before the walk (AMD.5.3 step 2).
+    if now > root.expiry {
+        return Err(IntentError::Attenuation(AttenuationError::Expired));
+    }
+
+    // 2. Root signature.
+    check_root_signature(root, root_verifier)?;
+
+    // 3. Walk root -> current.
+    let mut prior_full = canonical::root_full(root);
+    let mut prior_scope = &root.scope;
+
+    for (hop, entry) in entries.iter().enumerate() {
+        // (a) Hash link: recompute the digest of the prior state and compare.
+        let expected = digest(&prior_full);
+        if entry.received_digest != expected {
+            return Err(IntentError::BrokenLink { hop });
+        }
+
+        // (b) Subset check — REQUIRED for a reconstructed chain (extend did not run).
+        if !entry.emitted_scope.is_subset_of(prior_scope) {
+            return Err(IntentError::Attenuation(AttenuationError::WouldBroaden));
+        }
+
+        // (c) Entry signature under the hop's verifying key.
+        let verifier = *hop_verifiers
+            .get(hop)
+            .ok_or(IntentError::HopKeyMissing { hop })?;
+        let bytes = canonical::entry_signed_content(entry);
+        verifier
+            .verify_dual(&bytes, &entry.signature)
+            .map_err(|_| IntentError::EntrySignatureInvalid { hop })?;
+
+        // (d) Advance.
+        prior_full = canonical::entry_full(entry);
+        prior_scope = &entry.emitted_scope;
+    }
+
+    Ok(())
+}
+
 /// SKULD. Stateless; realizes the [`IntentChain`] trait (whose provided `attenuate`
 /// routes through `extend`, so no widening path is reachable) and adds the real
 /// signing pipeline around it.
@@ -126,12 +215,19 @@ impl Skuld {
     }
 
     /// Verify a Root Intent signature: recompute the canonical bytes and require BOTH
-    /// families to verify.
+    /// families to verify. (Delegates to the shared root-sig check — behavior unchanged.)
     pub fn verify_root(&self, root: &RootIntent, keypair: &DualKeyPair) -> Result<(), IntentError> {
-        let bytes = canonical::root_signed_content(root);
-        keypair
-            .verify_dual(&bytes, &root.signature)
-            .map_err(|_| IntentError::RootSignatureInvalid)
+        check_root_signature(root, keypair)
+    }
+
+    /// Verify a Root Intent signature using a **public key only** (no private material).
+    /// Same check as [`verify_root`], with a public root of trust.
+    pub fn verify_root_public(
+        &self,
+        root: &RootIntent,
+        public: &DualPublicKey,
+    ) -> Result<(), IntentError> {
+        check_root_signature(root, public)
     }
 
     /// The real `attenuate`: compute the hash link to the prior chain state, sign the
@@ -219,44 +315,26 @@ impl Skuld {
         hop_keypairs: &[&DualKeyPair],
         now: Timestamp,
     ) -> Result<(), IntentError> {
-        // 1. Freshness, at the start, before the walk (AMD.5.3 step 2).
-        if now > root.expiry {
-            return Err(IntentError::Attenuation(AttenuationError::Expired));
-        }
+        verify_chain_with(root, entries, root_keypair, hop_keypairs, now)
+    }
 
-        // 2. Root signature.
-        self.verify_root(root, root_keypair)?;
-
-        // 3. Walk root -> current.
-        let mut prior_full = canonical::root_full(root);
-        let mut prior_scope = &root.scope;
-
-        for (hop, entry) in entries.iter().enumerate() {
-            // (a) Hash link: recompute the digest of the prior state and compare.
-            let expected = digest(&prior_full);
-            if entry.received_digest != expected {
-                return Err(IntentError::BrokenLink { hop });
-            }
-
-            // (b) Subset check — REQUIRED for a reconstructed chain (extend did not run).
-            if !entry.emitted_scope.is_subset_of(prior_scope) {
-                return Err(IntentError::Attenuation(AttenuationError::WouldBroaden));
-            }
-
-            // (c) Entry signature under the hop's verifying key.
-            let hop_keypair = *hop_keypairs
-                .get(hop)
-                .ok_or(IntentError::HopKeyMissing { hop })?;
-            let bytes = canonical::entry_signed_content(entry);
-            hop_keypair
-                .verify_dual(&bytes, &entry.signature)
-                .map_err(|_| IntentError::EntrySignatureInvalid { hop })?;
-
-            // (d) Advance.
-            prior_full = canonical::entry_full(entry);
-            prior_scope = &entry.emitted_scope;
-        }
-
-        Ok(())
+    /// Verify a chain using only declared **public roots of trust** — a `DualPublicKey`
+    /// for the root and each hop, holding **no** private material. Identical semantics to
+    /// [`verify_chain`] (same freshness → root-sig → per-hop hash-link, subset re-check,
+    /// entry-sig order; same error variants; same fail-closed behavior) — only the
+    /// verifying-key type differs, and both delegate to the one shared walk.
+    ///
+    /// This is the SKULD-side path SINDRI (Phase 4) will call, with public keys resolved
+    /// from OQGF-M-1 attestations. It closes the public-roots-of-trust half of OQGF-M-8
+    /// on the chain-verifier side; wiring attestation→resolved-key→this call is Phase 4.
+    pub fn verify_chain_public(
+        &self,
+        root: &RootIntent,
+        entries: &[IntentChainEntry],
+        root_public: &DualPublicKey,
+        hop_publics: &[&DualPublicKey],
+        now: Timestamp,
+    ) -> Result<(), IntentError> {
+        verify_chain_with(root, entries, root_public, hop_publics, now)
     }
 }

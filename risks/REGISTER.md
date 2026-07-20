@@ -105,7 +105,7 @@ in Phase 2 stands; this risk covers only what Phase 2 explicitly could not guara
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
 | **plan.target** | Phase 4 prerequisite (before SINDRI verifies chains it did not sign) |
-| **plan.status** | ~~`TreatmentStatus::Open`~~ → **`TreatmentStatus::Executed`** (17 Jul 2026, Phase 2 revision — see UPDATE below) |
+| **plan.status** | ~~`TreatmentStatus::Open`~~ → **`TreatmentStatus::Executed`** (17 Jul 2026, Phase 2 revision — type added; 20 Jul 2026, Phase 3 revision — SKULD verify path added; see UPDATEs below). Residual **still Open**, target Phase 4 (SINDRI wiring) |
 | **mitigation** | Add a `DualPublicKey` type to `brokkr-crypto` (`from_public_bytes` + a verify path independent of the private keypair), so `verify_chain` and SINDRI can verify with public roots of trust only. Not an amendment-gap — the framework is clear; the type is missing. |
 | **residual (required by type)** | After the type is added: verification uses public roots of trust. Residual = the *provenance* of those public keys still depends on OQGF-M-1 attestation (HW root of trust) being valid — a bounded dependency verified at the gate (Phase 4), re-assessed when SINDRI wires attestation→public-key. Residual `likelihood: Unlikely`, `impact: Major`. |
 
@@ -124,6 +124,23 @@ Phase 4 prerequisite is MET and the blocker is removed.** Per OQGF-P-10.5 the
   Residual `likelihood: Unlikely`, `impact: Major`, target **Phase 4**, status **Open**. The
   risk is *reduced* (the type exists) but **not closed** until the wiring lands. OQGF-M-8 in
   `CONF-2026-07-16-P3-R1` stays **partial** until then.
+
+**UPDATE — 20 July 2026 (Phase 3 revision, `reports/PHASE-3-REV-2026-07-20-R1.md`):** the
+SKULD-side public-key verify path now **EXISTS**. `brokkr-intent` gained
+`Skuld::verify_chain_public` (and `verify_root_public`): chain verification using only declared
+public roots of trust (`DualPublicKey`), no private material, identical semantics to
+`verify_chain` (both delegate to one shared walk). Proven by
+`test_verify_chain_public_accepts_valid_multihop` and the keypair/public-key equivalence test
+(`CONF-2026-07-20-P3-REV-R1.md`, `FUNC-2026-07-20-R1.md`). The residual is **further reduced**:
+
+- **Residual (re-dispositioned, still OPEN — Phase 4):** the *type* (Phase 2 rev) and now the
+  *SKULD-side verify path* (this revision) both exist and are tested. What remains for Phase 4
+  (SINDRI) is the **wiring**: resolve a hop's public key from its OQGF-M-1 attestation and call
+  `verify_chain_public`; the *provenance* of those keys still depends on the attestation (HW
+  root of trust) being valid. Residual `likelihood: Unlikely`, `impact: Major`, target **Phase
+  4**, status **Open**. The risk is *further reduced* (type + verify path exist) but **not
+  closed** until SINDRI wires attestation→public-key→verify. OQGF-M-8 in `CONF-2026-07-16-P3-R1`
+  stays **partial** until then.
 
 **Provenance note:** Raised by the Phase 3 records correction. The Phase 3 chain cryptography
 (canonical serialization, dual-family signing, hash-linking, freshness) stands and is tested;
