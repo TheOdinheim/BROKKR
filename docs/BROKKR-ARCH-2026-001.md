@@ -3,15 +3,15 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.2
-**Supersedes:** Rev 1.1 (commit `4a94fad`) and Rev 1.0 (commit `0ed1849`). Both preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.3
+**Supersedes:** Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
-**Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-9), and Amendments AMD-001 … AMD-007 in full
+**Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 14 July 2026
+**Date:** 24 July 2026
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** GAP-2026-07-14-001 (eight ABSENT findings from conformance check CONF-2026-07-14-P0.5-R1)
+**Disposes:** GAP-2026-07-24-001 and GAP-2026-07-24-002 (Phase 4 surface check). Rev 1.2 disposed GAP-2026-07-14-001.
 
 ---
 
@@ -206,7 +206,7 @@ Four load-bearing observations.
 
 4. **REGIN checks the genome.** The proposed tool must be a declared, signed member of the Tool Genome, and the calling hop must hold the tool's privilege class. A tool not in the genome does not exist. A privileged tool proposed by a hop that lacks the privilege is refused here.
 
-5. **SINDRI runs the costimulation gate.** The deterministic spine. Both signals required (OQGF-M-11): Signal 1, BROKKR's attestation for this hop (OQGF-M-1); Signal 2, a valid Intent Provenance Chain (OQGF-M-8) tracing this action to the Root Intent. It walks the chain, verifies each link's hash and signature, confirms `emitted ⊆ received` at every hop (OQGF-M-9), confirms the action lies within scope, and evaluates it against the accumulated invariants. Any failure → **architectural anergy**: denied, signed denial to HEIMDALL, recorded in SAGA. Identity alone never suffices.
+5. **SINDRI runs the costimulation gate.** The deterministic spine. Both signals required (OQGF-M-11): Signal 1, BROKKR's attestation for this hop (OQGF-M-1); Signal 2, a valid Intent Provenance Chain (OQGF-M-8) tracing this action to the Root Intent. It walks the chain, verifies each link's hash and signature, confirms `emitted ⊆ received` at every hop (OQGF-M-9), confirms the action lies within scope, and evaluates it against the accumulated invariants. Any failure → **architectural anergy**: denied, signed denial to HEIMDALL, recorded in SAGA. Identity alone never suffices. **Phase-4 scope (Rev 1.3):** of the four conjuncts named here, SINDRI enforces the two cryptographic signals; confirming the action lies within scope and evaluating it against the accumulated invariants are deferred under the Deferred-Conjunct Deadline and SHALL be enforced before the executor is wired at Phase 11 — see §6.4.
 
 6. **HÚÐ governs the crossing, when there is one.** Classified content to an unauthorized destination is a **deterministic Deny** (OQGF-I-10), non-suppressible. Unprovenanced ingress into a privileged context is **quarantined** (OQGF-I-11). Every crossing carries a signed Boundary Custody Record (OQGF-I-9). **The reasoner endpoint is one such destination** — the same gate, the same logic (§6.6).
 
@@ -338,25 +338,147 @@ A hop that needs authority broader than it holds cannot self-broaden; it surface
 
 ### 6.4 SINDRI — the Costimulation Gate
 
+Every privileged tool call passes here. SINDRI contains no model and exposes no channel to one. It is the deterministic spine's decision point, and it is where OQGF-M-11 lands.
+
+**The committed trait is a two-method split, and the split is load-bearing.** Rev 1.2 sketched `CostimulationGate` as a single `authorize` method supplied by the implementor. The committed `brokkr-core` inverts that, and the inversion is a stronger guarantee than the sketch:
+
 ```rust
-/// Every privileged tool call passes here. Grants only if BOTH Signal 1
-/// (identity) and Signal 2 (a valid Intent Provenance Chain) verify AND the
-/// action lies within the attenuated scope AND violates no invariant.
-/// Otherwise: Anergy. Contains no model and exposes no channel to one.
+/// Every privileged tool call passes here. It contains no model and exposes no
+/// channel to one.
 pub trait CostimulationGate: Send + Sync {
-    fn authorize(
+    /// Verdict logic, supplied by the implementor (SINDRI). Ok(()) grants;
+    /// Err(reason) yields anergy. This method CANNOT mint.
+    fn evaluate(
         &self,
         identity: &Attestation,          // Signal 1 (OQGF-M-1)
         chain: &IntentProvenanceChain,   // Signal 2 (OQGF-M-8)
         action: &Action,
-    ) -> AuthorizationDecision;          // Granted(AuthorizedAction) | Anergy
+    ) -> Result<(), AnergyReason>;
+
+    /// Provided, and the sole minter of AuthorizedAction in the workspace.
+    /// `mint` is private to the gate module, so an override gains nothing:
+    /// it can only ever return Anergy.
+    fn authorize(&self, identity: &Attestation, chain: &IntentProvenanceChain,
+                 action: Action) -> AuthorizationDecision { /* provided */ }
 }
 
-/// Produced ONLY by a successful SINDRI authorization. No public constructor.
+/// Produced ONLY by the provided `authorize`. No public constructor.
+/// Derives neither Clone nor Copy: a granted authorization cannot be duplicated.
 pub struct AuthorizedAction { /* private fields */ }
 ```
 
-The `AuthorizedAction` type is the structural heart: the executor accepts nothing else, and only SINDRI can mint one. **An attestation failure emits an A.6.1 incident-response trigger.**
+The consequence is **fail-safe by construction**: an implementor of `CostimulationGate` cannot mint an `AuthorizedAction` even deliberately, because `mint` is module-private. The worst a buggy, misconfigured, or compromised SINDRI can do is **wrongly deny**. It cannot wrongly grant. This is I-1 enforced at a stronger point than "no public constructor" alone — the minter is not merely private, it is unreachable from the verdict logic. The `AuthorizedAction` type remains the structural heart: the executor accepts nothing else.
+
+**OQGF-M-11 requires four conjuncts for a grant.** All four are stated here in full, because the requirement is not reduced by this revision — only the phase at which each is enforced:
+
+| # | Conjunct | Source | Enforced at |
+|---|---|---|---|
+| 1 | **Signal 1** — identity attestation | OQGF-M-1, M-11 | **Phase 4** |
+| 2 | **Signal 2** — a valid Intent Provenance Chain | OQGF-M-8, M-9, M-14 | **Phase 4** |
+| 3 | **Action lies within the current attenuated scope** | OQGF-M-11 | **Deferred — see below** |
+| 4 | **Action respects the accumulated invariant set** | OQGF-M-10, M-11 | **Deferred — see below** |
+
+```mermaid
+flowchart TD
+    A["evaluate(identity, chain, action, now)"] --> B{"Signal 1:<br/>resolve(identity.subject)"}
+    B -->|None| X1["Anergy: IdentityUnverified"]
+    B -->|"Some(key)"| C{"Binds to the chain's<br/>current hop?"}
+    C -->|No| X1
+    C -->|Yes| D{"Signal 2:<br/>verify_chain_public"}
+    D -->|"Expired"| X2["Anergy: ChainExpired"]
+    D -->|"HopKeyMissing"| X1
+    D -->|"other IntentError"| X3["Anergy: ChainInvalid"]
+    D -->|"Ok"| E["Conjunct 3 — action in scope<br/>DEFERRED (Rev 1.3)"]
+    E --> F["Conjunct 4 — action respects invariants<br/>DEFERRED (Rev 1.3)"]
+    F --> G["Ok(()) — the provided authorize<br/>mints AuthorizedAction"]
+```
+
+#### Signal 1 at Phase 4 — what it is, and what it is not
+
+**Signal 1 is: the identity resolves to a declared root of trust, and it binds to the hop the chain's signature actually proves.** SINDRI SHALL require both of:
+
+- **Resolution.** `resolve(identity.subject)` returns a key. A subject that is not a declared root of trust yields `AnergyReason::IdentityUnverified`. This is the architectural-anergy property of OQGF-M-11: recognition that is not *declared* recognition confers nothing.
+- **Binding.** The presented identity SHALL be the identity the chain's cryptography actually proves possession for. Two cases, both of which SHALL be defined in the implementation:
+  - **Chain with hops:** `identity.subject` SHALL equal the subject of the final entry's `hop_identity`, and that entry's signature SHALL have verified under `resolve(identity.subject)` during Signal 2.
+  - **Root-only chain (no entries):** `identity.subject` SHALL equal `root.principal`, and the root signature SHALL have verified under `resolve(identity.subject)` during Signal 2.
+
+  A presented identity that does not bind yields `AnergyReason::IdentityUnverified`. **The binding is not incidental — it is what makes Signal 1 mean anything.** Without it, an actor could present a declared identity A alongside a chain whose hops are all B: Signal 1 would "resolve," Signal 2 would "verify," and the two would never be connected to each other.
+
+**Proof of possession comes from Signal 2, and it is real.** The chain-entry signature is verified under the key the registry declares for that subject. An actor that does not hold that private key cannot produce a verifying entry. Possession is therefore cryptographically proven, by dual-family PQC signature, without any separate attestation-signature check.
+
+**The intrinsic attestation-signature check is dropped at Phase 4, and here is what that costs.** `Attestation` carries a `signatures: DualSignature` field, but the committed types define **no canonical signed content** for an attestation — there is nothing that says what those signatures cover. The only attestation encoding in the tree is private to `brokkr-intent` and *includes* the signatures themselves, so it describes how a chain entry commits to an attestation, not what the attestation's own signature covers. Verifying that field would require authoring an encoding, which would bind whatever component eventually issues attestations — and no attestation issuer exists yet.
+
+Dropping the check does **not** weaken proof of possession (Signal 2 supplies it). It **does** mean that at Phase 4:
+
+> **`Attestation.measurements` is carried but never verified.** Nothing checks the platform measurements against expected values, and nothing binds them to a hardware root of trust. Signal 1 at Phase 4 is therefore **key possession for a declared identity** — PKI-grade identity — **not hardware-attested platform state**.
+
+**OQGF-M-1 is therefore recorded `partial`, not satisfied**, with that residual named. It is not made worse by this revision — measurements are unverifiable today regardless, because nothing issues attestations — but the architecture SHALL NOT record as satisfied a requirement whose central artifact goes unchecked. Closing M-1 requires an attestation issuer, a committed attestation signed-content encoding, and a measurement-expectation source. Those are later work and are listed in §13.
+
+#### Conjuncts 3 and 4 — deferred, with a deadline
+
+**Why they cannot be built at Phase 4.** `Action` is `{ tool: ToolId, detail: String }`. It carries no capability. `ToolId` is REGIN's tool-genome vocabulary; `Capability` is the intent vocabulary; the two are deliberately distinct types with no committed conversion. `Invariant` is an opaque `String` with no committed `(Action, Invariant) -> bool` predicate. For SINDRI to compute conjuncts 3 and 4, the gate would have to author the mapping between REGIN's vocabulary and intent's, and author an invariant-evaluation semantics — **defining, from inside Phase 4, the authorization vocabulary that Phase 5 exists to own.** That is the builder becoming the channel by which its own governing specification changes, which §0 and §1 of the build rules forbid.
+
+**Why deferring is safe right now, and only right now.** Nothing consumes an `AuthorizedAction` until the executor is wired, and the executor is **Phase 11**, last by design. Between Phase 4 and Phase 11 there is no execution path for an under-checked authorization to reach. The deferral is safe because of build order, not because the conjuncts are optional.
+
+**The Deferred-Conjunct Deadline (normative).**
+
+> Conjuncts 3 and 4 SHALL be enforced by SINDRI **before the executor is wired (Phase 11)**. The executor SHALL NOT be wired to a gate that does not evaluate the action against the chain's current scope and accumulated invariant set. Expected landing: **Phase 5 (REGIN)**, which owns the tool-to-capability vocabulary, or a scoped SINDRI revision immediately following it — the same additive-revision pattern used for `DualPublicKey` (Phase 2 revision) and `verify_chain_public` (Phase 3 revision). This deadline is a gate on Phase 11, not a preference.
+
+**What closing them requires**, so disposition is fast when REGIN lands:
+
+- An **action-to-capability binding**: either a `required: Capability` field (or `Vec`) on `Action`, or a REGIN-owned `required_capability(&Action) -> Capability` consumed by SINDRI through a trait SINDRI does not implement — the same seam pattern as the key resolver.
+- An **invariant-evaluator seam**: a REGIN- or policy-owned `(&Action, &Invariant) -> bool` reached through an interface, so SINDRI evaluates invariants without owning their semantics.
+
+Until both exist, **OQGF-M-11 is recorded `partial`** (two of four conjuncts enforced) and **OQGF-M-10's action-evaluation clause remains `partial`** (accumulation and non-removal are satisfied in SKULD; evaluation of an action against the set is not yet performed anywhere).
+
+#### The anergy mapping
+
+SINDRI's `evaluate` returns `AnergyReason` values, and the mapping from the chain verifier's errors SHALL be:
+
+| Condition | `AnergyReason` |
+|---|---|
+| `resolve()` returns `None`, or the identity does not bind to the chain's current hop | `IdentityUnverified` |
+| `IntentError::HopKeyMissing` | `IdentityUnverified` |
+| `IntentError::Attenuation(Expired)` | `ChainExpired` |
+| `IntentError::Attenuation(WouldBroaden)` | `ChainInvalid` |
+| `IntentError::RootSignatureInvalid` | `ChainInvalid` |
+| `IntentError::EntrySignatureInvalid` | `ChainInvalid` |
+| `IntentError::BrokenLink` | `ChainInvalid` |
+
+`WouldBroaden` on a reconstructed chain maps to `ChainInvalid`, not `OutOfScope`: a chain whose entries broaden is an **integrity** failure of the chain itself, not a statement about the action. `OutOfScope` and `InvariantViolated` are reserved for conjuncts 3 and 4 and are unreachable at Phase 4 by construction.
+
+**Freshness is a parameter, never a wall-clock read.** The current time is passed into the evaluation and through to chain verification, so freshness behavior is deterministic and testable.
+
+**An attestation failure emits an A.6.1 incident-response trigger** (§11).
+
+### 6.4.1 Key resolution — declared roots of trust
+
+**The committed `Attestation` carries no public key.** SINDRI verifies chain signatures with `DualPublicKey` (via `Skuld::verify_chain_public`), so it must obtain each hop's verifying key from somewhere. Rev 1.2 was silent on this; Rev 1.3 settles it.
+
+**Decision: keys come from a declared registry, reached through a resolver seam.** SINDRI depends on an interface, not on a concrete registry:
+
+```rust
+/// Resolve the verifying key for the hop that produced this attestation.
+/// None means: this subject is not a declared root of trust.
+pub trait KeyResolver: Send + Sync {
+    fn resolve(&self, attestation: &Attestation) -> Option<DualPublicKey>;
+}
+```
+
+The resolver is held in the gate's own state and injected at construction. **SINDRI SHALL NOT know where a key came from.** It asks only "resolve this attestation to a verifying key," and that ignorance is deliberate: it is what makes the seam a migration path rather than a hardcoded choice.
+
+**Two resolution models, one seam.**
+
+| Model | How a key is trusted | Status |
+|---|---|---|
+| **Declared registry** | A `SubjectId → DualPublicKey` mapping of declared roots of trust, established out of band | **Adopted at Phase 4** |
+| **Attestation-carried, issuer-certified** | The attestation carries the subject's key, certified by an issuer whose root SINDRI holds; SINDRI verifies the attestation against the issuer root, then extracts the subject key | **Deferred; reachable without changing SINDRI** |
+
+The registry model is adopted because BROKKR's hops are **its own internal pipeline** — the system controls its own hop identities — and because every other trust anchor in this architecture is a signed, DAP-owned REGIN register (the Tool Genome, CBOM, AIBOM, Endpoint Registry). A roots-of-trust register is the same pattern, and it belongs in REGIN.
+
+**The registry is `SelfModifying` (I-7).** Adding, removing, or changing a declared root of trust changes who BROKKR will obey. When the roots-of-trust register lands in REGIN (Phase 5), it SHALL be a signed register, and modifying it SHALL be costimulated and DAP-confirmed like any other genome change. At Phase 4 the resolver is constructed from declared pairs supplied directly; **Phase 4 SHALL NOT implement a signed-register loader** — that is REGIN's.
+
+**The migration to attestation-carried keys changes no SINDRI code.** It requires a public-key field on `Attestation` (a `brokkr-core` change), a committed attestation signed-content encoding, an issuer-root concept, and a new resolver implementation behind the same trait. The gate — the part hardest to get right — is untouched. This is why the seam exists.
 
 ### 6.5 HÚÐ — the Barrier
 
@@ -710,6 +832,9 @@ Named, not claimed eliminated.
 - **Uncontrolled channels.** Data leaving through a channel BROKKR does not operate — the developer's own terminal, a personal device — is outside HÚÐ's reach. Enumerated and reduced (OQGF-I-14), never claimed as enforced.
 - **OQGF-R-6 is unmet at Enhanced.** Threshold key custody is not implemented, the framework's own tiering of it is contradictory, and this is recorded as a gap rather than read down to a tier where it disappears (§1.4, §6.11).
 - **The reasoner's competence.** BROKKR governs what the model may *do*, not how well it *reasons*. Quality of reasoning is a property of MÍMIR, improved by adopting better models — not something the spine can enforce.
+- **Attestation is not verified as attestation.** *(New in Rev 1.3.)* At Phase 4, Signal 1 proves key possession for a declared identity; it does not verify `Attestation.measurements` against expected platform state, and no attestation issuer exists. OQGF-M-1 is PARTIAL. Closing it requires an issuer, a committed attestation signed-content encoding, and a measurement-expectation source (§6.4).
+- **Two of OQGF-M-11's four conjuncts are not yet enforced.** *(New in Rev 1.3.)* Action-in-scope and action-respects-invariants are deferred pending the tool-to-capability vocabulary (REGIN, Phase 5) and an invariant-evaluator seam. Bounded by the **Deferred-Conjunct Deadline** (§6.4): both SHALL be enforced before the executor is wired at Phase 11.
+- **Declared roots of trust are pre-shared.** *(New in Rev 1.3.)* Trust in a hop's key rests on out-of-band registration, not on a hardware root of trust certifying that key at attestation time (§6.4.1).
 
 ---
 
@@ -732,12 +857,13 @@ Named, not claimed eliminated.
 | OQGF-I-6 (graded response) | `brokkr-sentinel` posture raise via coordinated signal |
 | OQGF-I-7 (recorded resolution) | `brokkr-sentinel` (EIR) — `ResolutionDecision`, never a timeout |
 | OQGF-I-8 … I-15 (AMD-007) | `brokkr-barrier` (HÚÐ) — egress Deny, ingress Quarantine, BCRs, bypass detection, uncontrolled-channel register |
-| OQGF-M-1 (attestation) | `Attestation` per hop, verified in SINDRI |
+| **OQGF-M-1 (attestation)** | **PARTIAL — `Attestation` per hop. SINDRI verifies key possession for a declared root of trust (§6.4.1) and binds identity to the chain's proven hop; `measurements` are not verified and no issuer exists (§6.4, §13)** |
 | OQGF-M-4 (short-lived creds) | Root Intent freshness and expiry (OQGF-M-14) |
 | **OQGF-M-5 (mutual auth)** | **`ModelEndpoint::client_cert` required at registration. One-sided TLS is unrepresentable (I-11)** |
 | **OQGF-M-6 (vendor trust score)** | **`brokkr-genome::VendorTrustScore` — quarterly, gate-blocking when stale. Distinct from R-2** |
-| OQGF-M-8 … M-14 (AMD-001) | `brokkr-intent` (SKULD) |
-| OQGF-M-11 (costimulation) | `brokkr-gate::CostimulationGate::authorize` |
+| OQGF-M-8 … M-14 (AMD-001) | `brokkr-intent` (SKULD). **Chain verified in SINDRI via `Skuld::verify_chain_public` against declared public roots of trust (§6.4.1)** |
+| **OQGF-M-11 (costimulation)** | **PARTIAL at Phase 4 — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. Signals 1 and 2 enforced; action-in-scope and action-respects-invariants deferred under the Deferred-Conjunct Deadline (§6.4)** |
+| **OQGF-M-10 (invariant enforcement)** | **PARTIAL — accumulation and non-removal enforced in SKULD; evaluation of an action against the accumulated set deferred (§6.4)** |
 | OQGF-M-12 (reconciliation) | `brokkr-sentinel` cross-hop reconciliation |
 | OQGF-A (accountability) | `brokkr-audit` (SAGA) — dual-signed append-only, re-signing, signed export |
 | **OQGF-A.6.1 (IR triggers)** | **§11 — four triggers emitted; the plan is organizational** |
@@ -756,11 +882,25 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new in Rev 1.2** — the disposition of GAP-2026-07-14-001.
+**Bold rows are new or amended in Rev 1.2 and Rev 1.3.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amends the M-1, M-8…M-14, M-10, and M-11 rows per §6.4 and §6.4.1.
 
 ---
 
 ## 15. Change log
+
+**Rev 1.3 — 24 July 2026. Disposes GAP-2026-07-24-001 and GAP-2026-07-24-002, both filed by the builder at the Phase 4 surface check, before any gate code was written. This revision defers enforcement and does not claim to be add-only.**
+
+Every prior revision of this architecture could truthfully state that each change added or tightened and nothing was relaxed. **This one cannot, and says so.** OQGF-M-11 stands in full; what changes is the phase at which two of its four conjuncts are enforced, bounded by a deadline that gates Phase 11. The alternatives were to have the gate invent the authorization vocabulary (forbidden), to fail open on two conjuncts (a gate that grants unchecked actions), or to deny all (autoimmunity, an OQGF-P-1 host-harm failure of equal standing to a missed threat). Deferral with a named deadline and a PARTIAL record was the only option that neither invents governance nor breaks the gate.
+
+- **§6.4 replaced.** Records the committed two-method `CostimulationGate` — the Rev 1.2 single-method sketch was inverted in `brokkr-core`. Implementors supply `evaluate`; the provided `authorize` is the sole minter of `AuthorizedAction` via a module-private `mint`. **This is a stronger I-1 than "no public constructor" alone:** a gate implementation cannot mint at all, so the worst it can do is wrongly deny, never wrongly grant.
+- **Signal 1 defined** as resolve-to-declared-root plus binding to the chain's verified current hop (both the with-hops and root-only cases). The intrinsic attestation-signature check is dropped as redundant with Signal 2, which supplies proof of possession by dual-family PQC signature. **The cost is named, not buried:** `Attestation.measurements` goes unverified, and **OQGF-M-1 is recorded PARTIAL**.
+- **§6.4.1 added.** Key provenance is settled — Rev 1.2 asserted attestations were "verified in SINDRI" without saying against what key, and the committed `Attestation` carries none. Keys now come from a declared `SubjectId → DualPublicKey` registry reached through a `KeyResolver` seam. The attestation-carried, issuer-certified model is deferred and **reachable without changing SINDRI**, which is the point of the seam. The roots-of-trust register is `SelfModifying` and belongs to REGIN (Phase 5).
+- **Two of OQGF-M-11's four conjuncts deferred.** Action-in-scope and action-respects-invariants cannot be computed from the committed types: `Action` carries no capability, `ToolId` and `Capability` are deliberately distinct with no committed conversion, and `Invariant` has no evaluation predicate. Computing them would mean the gate authoring REGIN's vocabulary from inside Phase 4. They are deferred under the **Deferred-Conjunct Deadline** — both SHALL be enforced before the executor is wired at Phase 11. **OQGF-M-11 and OQGF-M-10 are recorded PARTIAL.**
+- **§5 step 5 annotated.** The governed-action-cycle description of SINDRI names all four conjuncts; a Phase-4 scope note now points to §6.4 so the cycle description and the subsystem specification cannot be read against each other.
+- **§13 and §14 updated** to carry the three new residuals and the four amended traceability rows.
+- **Front matter corrected.** The corpus binding read "AMD-001 … AMD-007" and the Physiology Layer "P-1 … P-9"; both predate AMD-008 (OQGF-P-10) and AMD-009 (OQGF-P-11). Now AMD-001 … AMD-009 and P-1 … P-11.
+
+**Process note, recorded because it is architectural.** Rev 1.2 added the rule that a recommendation which would unblock the recommender SHALL be labeled as such. At the Phase 4 surface check that rule fired on its own: the builder identified that "reduce Phase-4 scope to Signals 1–2" would unblock it, labeled it, and stated that its genuine preference was the *additive* options that would keep it blocked. It then wrote no code and filed two gap reports. **The gate held at the point where holding cost the builder something.** Placed by the DAP.
 
 **Rev 1.2 — 14 July 2026. Disposes GAP-2026-07-14-001 (eight ABSENT findings from conformance check CONF-2026-07-14-P0.5-R1). Every change adds or tightens. Nothing is relaxed.**
 
@@ -792,4 +932,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.2.
+— End of BROKKR technical architecture, Rev 1.3.
