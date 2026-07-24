@@ -149,6 +149,60 @@ added by this revision, with the wiring residual carried forward to Phase 4.
 
 ---
 
+## RISK-2026-0004 — Two of OQGF-M-11's four conjuncts not enforced at Phase 4 (OQGF-M-11 / M-10)
+
+| Field | Value |
+| --- | --- |
+| **id** | RISK-2026-0004 |
+| **source** | `RiskSource::ThreatModel` (Phase 4 conformance surface check, `CONF-2026-07-24-P4-R1.md` / `GAP-2026-07-24-001.md`; disposed by Architecture Rev 1.3, commit `612f4b5`) |
+| **description** | SINDRI enforces OQGF-M-11's Signals 1–2 (identity + Intent Provenance Chain). Conjuncts 3 (**action-in-scope**) and 4 (**action-respects-invariants**) are **not evaluated**, because `Action` carries no capability, `ToolId` and `Capability` have no committed conversion, and `Invariant` has no committed `(Action, Invariant) -> bool` evaluation predicate. |
+| **context** | Safe **only** because nothing consumes an `AuthorizedAction` until the executor is wired at **Phase 11** (last by design); between Phase 4 and Phase 11 there is no execution path an under-checked authorization can reach. The deferral is controlled by the **normative Deferred-Conjunct Deadline** (ARCH Rev 1.3 §6.4): conjuncts 3 and 4 SHALL be enforced before the executor is wired. The exposure **if the deadline is missed** is an executor wired to a gate that grants actions it has not checked for scope-fit or invariant-respect — a fail-open on two of four M-11 conjuncts. Recorded PARTIAL for M-11 and M-10 in ARCH §14; residual in §13. |
+| **likelihood** | `Likelihood::Possible` (a multi-phase scheduling dependency: the risk materializes only if Phase 11 proceeds before the Phase-5 seam lands — bounded by a normative deadline, but a real cross-phase dependency) |
+| **impact** | `Impact::Major` (an executor on an under-checking gate would grant out-of-scope or invariant-violating actions — the exact failure the costimulation gate exists to prevent) |
+| **owner** | Jeremy Rose (DAP) |
+| **disposition** | `Disposition::Reduce` |
+| **plan.owner** | Jeremy Rose |
+| **plan.target** | **Phase 5 (REGIN)** — an action-to-capability binding (a `required: Capability` field on `Action`, or a REGIN-owned `required_capability(&Action) -> Capability` consumed through a trait SINDRI does not implement) **and** an invariant-evaluator seam (`(&Action, &Invariant) -> bool` reached through an interface). A **hard gate before Phase 11** (the executor SHALL NOT be wired to a gate lacking both). Landing may be Phase 5 or a scoped SINDRI revision immediately after. |
+| **plan.status** | `TreatmentStatus::Open` |
+| **mitigation** | Land both seams (above); then extend SINDRI's `evaluate` to compute conjunct 3 (`required_capability(action) ∈ current_scope()` else `OutOfScope`) and conjunct 4 (invariant evaluator over `current_invariants()` else `InvariantViolated`). Enforce the Deferred-Conjunct Deadline as a precondition on wiring the executor at Phase 11. |
+| **residual (required by type)** | After both land: SINDRI evaluates all four conjuncts. Residual = the **correctness of the capability vocabulary and invariant semantics REGIN defines** — a governance/vocabulary judgment (does the tool→capability mapping and the invariant-evaluation predicate capture the intended authority?), re-assessed when the REGIN seams are specified. Residual `likelihood: Unlikely`, `impact: Major`, re-dispositioned at the Phase-5 seam. |
+
+**Provenance note:** Raised at the Phase 4 surface check when the committed types were found to
+lack the action-semantics surface for conjuncts 3–4. Disposed by the DAP via ARCH Rev 1.3 §6.4,
+which selected the scope option (the builder's labeled self-interest disclosure was correct and
+the labeled option was selected knowingly), stated all four conjuncts in full, reduced none, and
+bounded the deferral with the Deferred-Conjunct Deadline. This entry tracks the residual that
+deadline governs.
+
+---
+
+## RISK-2026-0005 — Attestation is not verified as attestation (OQGF-M-1 PARTIAL)
+
+| Field | Value |
+| --- | --- |
+| **id** | RISK-2026-0005 |
+| **source** | `RiskSource::ThreatModel` (Phase 4 conformance surface check, `CONF-2026-07-24-P4-R1.md` / `GAP-2026-07-24-002.md`; disposed by Architecture Rev 1.3, commit `612f4b5`) |
+| **description** | Signal 1 at Phase 4 proves **key possession** for a declared root of trust and binds it to the chain's cryptographically proven hop (via Signal 2). It does **not** verify `Attestation.measurements` against expected platform state, no attestation issuer exists, and the committed types define **no attestation signed-content encoding** for the `signatures` field. The intrinsic attestation-signature check is dropped as redundant with the Signal-2 possession proof. |
+| **context** | Signal 1 is **PKI-grade identity, not hardware-attested platform state**. This is **not a regression** — `measurements` are unverifiable today regardless, because nothing issues attestations. Trust in a hop's key rests on **out-of-band registration** (ARCH Rev 1.3 §6.4.1, the declared-registry model); pre-shared roots of trust are themselves a named residual (ARCH §13). Recorded PARTIAL for M-1 in ARCH §14. |
+| **likelihood** | `Likelihood::Unlikely` (exploitation requires an adversary holding a **declared** private key on a **compromised** platform — measurements would be the check that catches platform compromise, and that check is absent; but obtaining a declared private key is itself gated by registration) |
+| **impact** | `Impact::Major` (a compromised-but-declared platform would present a valid identity that the gate cannot distinguish from an honest one, because platform state goes unchecked) |
+| **owner** | Jeremy Rose (DAP) |
+| **disposition** | `Disposition::Reduce` |
+| **plan.owner** | Jeremy Rose |
+| **plan.target** | **Deferred** — closing M-1 requires an **attestation issuer**, a **committed attestation signed-content encoding** (a `brokkr-core` change), and a **measurement-expectation source**. The **Option A** resolver (attestation-carried, issuer-certified keys) slots in behind the existing `KeyResolver` seam **without changing SINDRI** (ARCH §6.4.1). No phase is yet assigned; it is later work. |
+| **plan.status** | `TreatmentStatus::Open` |
+| **mitigation** | Introduce an attestation issuer and a committed attestation signed-content encoding; add a measurement-expectation source so `measurements` can be checked against expected platform state; provide an Option-A `KeyResolver` implementation that verifies the attestation against an issuer root and extracts the subject key. SINDRI's verdict logic is unchanged by this migration (the seam exists for exactly this). |
+| **residual (required by type)** | After mitigation: platform state is attested and checked. Residual = **pre-shared roots of trust remain a trusted out-of-band input** (the issuer root and the initial registration are themselves trusted anchors) — the same shape as the ARCH §13 "declared roots of trust are pre-shared" residual, re-assessed when the issuer model is chosen. Residual `likelihood: Rare`, `impact: Major`. |
+
+**Provenance note:** Raised at the Phase 4 surface check when the committed `Attestation` was
+found to define no signed-content for its `signatures` field. Disposed by the DAP via ARCH Rev
+1.3 §6.4/§6.4.1, which adopted the gap's preferred construction (resolve-to-declared-root +
+bind-to-proven-hop, intrinsic check dropped), recorded exactly what it costs (`measurements`
+carried but unverified), and recorded M-1 PARTIAL rather than satisfied. This entry tracks the
+platform-attestation residual.
+
+---
+
 ## Register discipline (OQGF-P-10.6)
 
 - **Never delete.** A closed, superseded, or re-dispositioned entry is struck through with a
