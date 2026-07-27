@@ -220,6 +220,14 @@ pub struct InvariantEntry {
 /// `disallowed` and the construction-time invariant check are Phase 5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyRegister {
+    /// The closed vocabulary of capabilities BROKKR recognizes (Rev 1.5). Every
+    /// capability a tool requires (`ToolEntry::required_capabilities`), and every
+    /// capability an invariant forbids (`InvariantEntry::forbids_capabilities`),
+    /// SHALL appear here. `Capability` is an open `String` newtype, so without this
+    /// set there is nothing to check a declaration against: nothing distinguishes
+    /// `write` from `wirte`. Promotion-gate predicates 5 and 6 (Phase 5) check
+    /// against it; this revision places the field only.
+    pub capabilities: Vec<Capability>,
     pub invariants: Vec<InvariantEntry>,
     /// Algorithms that fail the promotion gate (OQGF-G-4). Typed identifiers, never
     /// strings (OQGF-G-5).
