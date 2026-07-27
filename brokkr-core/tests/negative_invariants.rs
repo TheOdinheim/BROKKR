@@ -472,6 +472,9 @@ fn trust_score() -> VendorTrustScore {
         breach_history: Score(90),
         jurisdictional_exposure: Score(50),
         data_handling: Score(60),
+        // Rev 1.4 M-6 fifth factor. Declared placeholder — measured by HEIMDALL (Phase 8),
+        // so it carries a placeholder here, matching the type's PARTIAL status.
+        reconciliation_pass_rate: Score(0),
         reviewed: Timestamp(1),
         reviewer: dap(),
         signature: dual_sig(),

@@ -189,15 +189,36 @@ RISK-2026-0005.
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
 | **plan.target** | **Phase 5 (REGIN)** — an action-to-capability binding (a `required: Capability` field on `Action`, or a REGIN-owned `required_capability(&Action) -> Capability` consumed through a trait SINDRI does not implement) **and** an invariant-evaluator seam (`(&Action, &Invariant) -> bool` reached through an interface). A **hard gate before Phase 11** (the executor SHALL NOT be wired to a gate lacking both). Landing may be Phase 5 or a scoped SINDRI revision immediately after. |
-| **plan.status** | `TreatmentStatus::Open` |
+| **plan.status** | `TreatmentStatus::Open` (types placed 27 Jul 2026, Rev 1.4 core revision — **enforcement still pending Phase 5**; see UPDATE below. NOT Executed: the treatment is the enforcement, not the type.) |
 | **mitigation** | Land both seams (above); then extend SINDRI's `evaluate` to compute conjunct 3 (`required_capability(action) ∈ current_scope()` else `OutOfScope`) and conjunct 4 (invariant evaluator over `current_invariants()` else `InvariantViolated`). Enforce the Deferred-Conjunct Deadline as a precondition on wiring the executor at Phase 11. |
 | **residual (required by type)** | After both land: SINDRI evaluates all four conjuncts. Residual = the **correctness of the capability vocabulary and invariant semantics REGIN defines** — a governance/vocabulary judgment (does the tool→capability mapping and the invariant-evaluation predicate capture the intended authority?), re-assessed when the REGIN seams are specified. Residual `likelihood: Unlikely`, `impact: Major`, re-dispositioned at the Phase-5 seam. |
+
+**UPDATE — 27 July 2026 (Phase 1 core revision, `reports/PHASE-1-REV-2026-07-27-R1.md`, under ARCH
+Rev 1.4):** the **types** for both treatment seams are now **placed in `brokkr-core`** — but the
+enforcement is not, so this remains **Open**:
+
+- **Action-to-capability binding — type placed.** `ToolEntry::required_capabilities: Vec<Capability>`
+  now carries, in the signed tool register, the least-privilege capabilities each tool exercises.
+  The §6.2 check ("every `required_capabilities` entry present in `chain.current_scope()`, else
+  `OutOfScope`; an undeclared tool is denied") is **SINDRI's and lands in Phase 5** — not built here.
+- **Invariant-evaluator surface — type placed.** `InvariantEntry { invariant, forbids_capabilities,
+  forbids_privilege }` + `PolicyRegister` place the **declarative** predicate surface, computable
+  from the signed registers. The evaluation (and the construction-time check that a Root Intent
+  carries no undeclared invariant) is **Phase 5**.
+- **The detail-level-invariant half stays OPEN.** Invariants that need to interpret `Action.detail`
+  (e.g. "read-only outside ./src") are **not** expressible by `InvariantEntry` and are a named
+  residual (ARCH §13). Placing `InvariantEntry` does not close them.
+
+**Disposition unchanged: `Reduce`, `plan.status: Open`.** The type surface is a prerequisite the
+revision satisfies; the **treatment is the enforcement**, which is Phase 5. This is **not** marked
+Executed. `likelihood: Possible`, `impact: Major` unchanged.
 
 **Provenance note:** Raised at the Phase 4 surface check when the committed types were found to
 lack the action-semantics surface for conjuncts 3–4. Disposed by the DAP via ARCH Rev 1.3 §6.4,
 which selected the scope option (the builder's labeled self-interest disclosure was correct and
 the labeled option was selected knowingly), stated all four conjuncts in full, reduced none, and
-bounded the deferral with the Deferred-Conjunct Deadline. This entry tracks the residual that
+bounded the deferral with the Deferred-Conjunct Deadline. ARCH Rev 1.4 then placed the type
+surface (this UPDATE); Phase 5 lands the enforcement. This entry tracks the residual that
 deadline governs.
 
 ---
