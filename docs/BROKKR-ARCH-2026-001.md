@@ -3,15 +3,15 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.3
-**Supersedes:** Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.4
+**Supersedes:** Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
 **Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 24 July 2026
+**Date:** 27 July 2026
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** GAP-2026-07-24-001 and GAP-2026-07-24-002 (Phase 4 surface check). Rev 1.2 disposed GAP-2026-07-14-001.
+**Disposes:** Rev 1.4 places the Phase-5 REGIN surface and discharges the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
 
 ---
 
@@ -263,7 +263,9 @@ Three rules bind every implementation: the model receives only the current atten
 
 ### 6.2 REGIN — the Genome
 
-REGIN is what BROKKR is *made of*, in the Genetic-Layer sense (OQGF-G). **Four** signed registers, and simultaneously the Self Set against which detectors are screened (OQGF-P-3).
+REGIN is what BROKKR is *made of*, in the Genetic-Layer sense (OQGF-G). **Six** signed registers, and simultaneously the Self Set against which detectors are screened (OQGF-P-3).
+
+Rev 1.2 declared four registers. Rev 1.4 adds two, both assigned to REGIN by later decisions rather than by §6.2 itself: the **roots-of-trust register** (Rev 1.3 §6.4.1 — "belongs to REGIN (Phase 5)") and the **policy register** (the treatment target of RISK-2026-0004, and OQGF-G-8's "policy expressed as code, version-controlled, signed"). Both were obligations REGIN already carried; neither was written into this section until now.
 
 ```rust
 pub struct Genome {
@@ -271,50 +273,165 @@ pub struct Genome {
     pub tools: ToolGenome,           // what BROKKR may invoke
     pub cbom: Cbom,                  // what cryptography BROKKR contains (OQGF-G-1)
     pub aibom: Aibom,                // what models BROKKR reasons with (OQGF-G-2)
-    pub endpoints: EndpointRegistry, // WHERE those models live, on what terms (NEW)
+    pub endpoints: EndpointRegistry, // WHERE those models live, on what terms
+    pub roots: RootsOfTrust,         // WHOSE signatures BROKKR will believe (NEW, Rev 1.4)
+    pub policy: PolicyRegister,      // WHICH invariants and algorithms bind (NEW, Rev 1.4)
     pub corpus_digest: Digest,
     pub owner: Dap,
     pub signature: DualSignature,    // ML-DSA + SLH-DSA (OQGF-R-1 at Enhanced)
 }
+```
 
-/// A model endpoint BROKKR is permitted to speak to.
-/// Registration is refused without a client certificate: OQGF-M-5 is enforced
-/// at REGISTRATION, not at connection time. An endpoint that cannot do mTLS
-/// is not an endpoint BROKKR can express.
-pub struct ModelEndpoint {
-    pub id: ModelEndpointId,
-    pub model: ModelIdentity,        // name, version, provider (AIBOM, OQGF-G-2)
-    pub client_cert: ClientCertRef,  // REQUIRED. No Option. (OQGF-M-5)
-    pub server_trust: TrustAnchor,   // pinned; not the system trust store
-    pub min_group: NamedGroup,       // minimum key-exchange group demanded
-    pub max_classification: Classification,  // ceiling this endpoint may RECEIVE
-    pub trust_score: VendorTrustScore,       // OQGF-M-6
+**I-10 extends to the new registers.** `roots` and `policy` are required fields, not `Option`s. A genome missing either is unrepresentable, exactly as an unsigned genome already is.
+
+#### The roots-of-trust register (OQGF-M-8, Rev 1.3 §6.4.1)
+
+SINDRI verifies chain signatures against **declared** public roots of trust. Rev 1.3 placed the `KeyResolver` seam and said the register belongs here. This is that register.
+
+```rust
+/// One declared root of trust: a subject and the dual-family public key
+/// BROKKR will accept signatures from.
+pub struct RootOfTrustEntry {
+    pub subject: SubjectId,
+    /// Raw ML-DSA-65 public key. Length-validated on import.
+    pub ml_dsa_public: Vec<u8>,
+    /// Raw SLH-DSA-SHAKE-192s public key. Length-validated on import.
+    pub slh_dsa_public: Vec<u8>,
 }
 
-/// OQGF-M-6. Distinct from OQGF-R-2 (substitutability). This is TRUSTWORTHINESS.
-/// A provider you can switch away from may still be one you should not send
-/// source code to. Reviewed quarterly; a stale score fails the promotion gate.
+pub struct RootsOfTrust {
+    pub entries: Vec<RootOfTrustEntry>,
+    pub signature: DualSignature,
+}
+```
+
+**Raw bytes, not a key type — and that is a dependency fact, not a style choice.** `DualPublicKey` lives in `brokkr-crypto`, which depends on `brokkr-core`. A core register that held `DualPublicKey` would invert that direction (I-5). The register therefore declares **bytes**, and SINDRI's resolver mints a `DualPublicKey` per resolution via `from_public_bytes`, which is length-validated and fail-closed. A malformed key in the register fails at resolution, not silently.
+
+**This register is `SelfModifying` (I-7), and it is the most consequential register in the genome.** Adding an entry declares whose signatures BROKKR will obey. Modifying it is costimulated *and* DAP-confirmed, with no carve-out — the same tier as modifying BROKKR's own control surface, because in effect that is what it does.
+
+**The residual is unchanged and named.** These roots are **pre-shared**: trust rests on out-of-band registration, not on a hardware root of trust certifying a key at attestation time (§13; RISK-2026-0005). Rev 1.4 does not close that; it gives the pre-shared model a signed, versioned, DAP-owned home rather than an ad-hoc one.
+
+#### The tool-to-capability binding (OQGF-M-11 conjunct 3, OQGF-M-13)
+
+SINDRI must confirm that an action lies within the chain's current attenuated scope. Scope is a set of `Capability`; an `Action` names a `ToolId`. Rev 1.3 deferred that conjunct because **no committed conversion existed** between the two vocabularies, and inventing one inside the gate would have been the gate authoring REGIN's vocabulary. Rev 1.4 places the conversion where it belongs — in the signed tool register, which already declares what a tool is:
+
+```rust
+pub struct ToolEntry {
+    pub id: ToolId,
+    pub schema: ToolSchema,
+    pub privilege: PrivilegeClass,
+    pub response_class: ResponseClass,
+    /// The authority this tool exercises, in the intent vocabulary (NEW, Rev 1.4).
+    /// EVERY capability listed here SHALL be present in the chain's current scope
+    /// for the action to be authorized. Least-privilege declaration (OQGF-M-13):
+    /// a tool declares the least authority it requires, not the most it could use.
+    pub required_capabilities: Vec<Capability>,
+}
+```
+
+**The check SINDRI performs, once this lands:** resolve `action.tool` in the tool genome; require that **every** capability in `required_capabilities` is present in `chain.current_scope()`. Any missing capability, or **a tool absent from the register**, yields `AnergyReason::OutOfScope`. An undeclared tool is not a permitted tool — the register is the closed vocabulary, and absence is denial, not silence.
+
+**Why the binding belongs to the genome and not the gate.** The tool register is signed, DAP-owned, and version-controlled. Declaring that `write_file` requires the `write` capability is a governance statement about what authority a tool exercises. Putting it in the genome makes that statement reviewable, diffable, and attributable to a named DAP. Putting it in the gate would have made it an implementation detail invisible to review.
+
+#### The policy register (OQGF-G-8, OQGF-M-10)
+
+Policy expressed as code, version-controlled and signed. It carries two things the promotion gate and the costimulation gate each need:
+
+```rust
+/// A declarative invariant predicate. An action VIOLATES this invariant if the
+/// tool it names requires any forbidden capability, or carries a forbidden
+/// privilege class. Both are computable from the signed registers alone —
+/// no interpretation of `Action.detail` (see the residual below).
+pub struct InvariantEntry {
+    pub invariant: Invariant,
+    pub forbids_capabilities: Vec<Capability>,
+    pub forbids_privilege: Vec<PrivilegeClass>,
+}
+
+pub struct PolicyRegister {
+    pub invariants: Vec<InvariantEntry>,
+    /// Algorithms that fail the promotion gate (OQGF-G-4). Typed identifiers,
+    /// never strings (OQGF-G-5).
+    pub disallowed: Vec<AlgorithmId>,
+    pub signature: DualSignature,
+}
+```
+
+**Declarative invariants only, and the boundary is stated plainly.** An invariant like `no-network-egress` is expressible here: it forbids the capabilities that reach the network. An invariant like `read-only outside ./src` is **not** — evaluating it requires interpreting a path inside `Action.detail`, which is an opaque `String` whose contents no committed type defines. Building that would mean designing a path-policy language *and* the tool-schema language it depends on, inside REGIN's first build, with less information than later phases will have. Rev 1.4 declines to invent it. **Detail-level invariants are a named residual (§13), not a silent omission.**
+
+**Undeclared invariants fail loudly at construction, not quietly at runtime.** A Root Intent SHALL NOT be constructed carrying an invariant absent from the policy register. This is the loud failure: a typo or an unsupported invariant is refused where a human is present, at the moment the intent is authored, rather than silently denying actions in production hours later.
+
+**SINDRI nonetheless fails closed at runtime.** If the gate meets an invariant for which the register declares no predicate, it returns `AnergyReason::InvariantViolated` — it denies. This is the backstop, and under the construction-time check it should never fire. **The direction is deliberate:** an invariant nobody has defined a predicate for blocks the action rather than passing it, which is OQGF-P-2's non-suppressible posture applied to policy. The cost is stated: a malformed policy register denies work rather than permitting it. That is the correct failure direction for a gate, and it is why the construction-time check exists to catch it first.
+
+#### The CBOM's typed algorithm inventory (OQGF-G-4, OQGF-G-5)
+
+OQGF-G-4 requires the promotion gate to prove an artifact is "free of disallowed algorithms." The CBOM's CycloneDX document is an opaque string; deciding that question by parsing it would make a **deterministic** gate depend on document parsing. OQGF-G-5 already forbids string algorithm identifiers everywhere else in BROKKR. The CBOM therefore carries both:
+
+```rust
+pub struct Cbom {
+    /// CycloneDX 1.6, the export format (OQGF-G-1).
+    pub cyclonedx: String,
+    /// The same inventory, typed — what the gate actually evaluates (OQGF-G-5).
+    pub algorithms: Vec<AlgorithmId>,
+    pub signature: DualSignature,
+}
+```
+
+`AlgorithmId` is a typed enum over the signature, hash, and KEM identifiers already committed in `brokkr-core::crypto`. **The gate evaluates the typed inventory; the CycloneDX string remains the interchange artifact.** The two SHALL agree, and the FFI honesty rule (§10) applies to both: no entry asserts an algorithm identity the backend cannot confirm.
+
+#### The vendor trust score (OQGF-M-6) — a corrected factor
+
+OQGF-M-6 names five factors: declared attestation capability, FIPS validation, breach history, jurisdictional exposure, and **statistical reconciliation pass rate**. Rev 1.2's `VendorTrustScore` carried the first four and substituted `data_handling` for the fifth. Adding `data_handling` (retention, training use, sub-processors) is a tightening and is retained. **Dropping the reconciliation pass rate was a conformance gap**, found when Rev 1.4 audited the genome types against the corpus rather than against the traceability table. The field is placed:
+
+```rust
 pub struct VendorTrustScore {
     pub attestation_capability: Score,
     pub fips_validation: Score,
     pub breach_history: Score,
-    pub jurisdictional_exposure: Score,  // whose law reaches this data?
-    pub data_handling: Score,            // retention, training use, sub-processors
-    pub reviewed: SystemTime,            // quarterly (OQGF-M-6)
+    pub jurisdictional_exposure: Score,
+    pub data_handling: Score,              // retained: a tightening beyond M-6
+    pub reconciliation_pass_rate: Score,   // NEW, Rev 1.4 — required by M-6
+    pub reviewed: Timestamp,
     pub reviewer: Dap,
     pub signature: DualSignature,
 }
 ```
 
-**The CBOM (OQGF-G-1)** lists every cryptographic primitive, library, parameter set, key reference, and FIPS validation reference: wolfCrypt's version and build provenance, ML-DSA, SLH-DSA, ML-KEM, HMAC-SHA-384, AES-256 (with its declared purpose, §6.11). CycloneDX 1.6 conformant. The FFI honesty rule (§10) applies to every entry.
+**It cannot be populated yet, and that is recorded rather than glossed.** A reconciliation pass rate is *measured*, not declared — it is the output of HEIMDALL's cross-hop reconciliation (OQGF-M-12, Phase 8). Until HEIMDALL feeds it, the field exists and carries a declared placeholder score. **OQGF-M-6 is therefore recorded PARTIAL** (§14): five of five factors present in shape, four of five sourced from declaration and one awaiting measurement.
+
+**Staleness is arithmetic, not judgment.** `Timestamp` is epoch milliseconds. Quarterly review means a score is **stale when `now - reviewed` exceeds 90 days (7,776,000,000 ms)**, and a stale score fails the promotion gate. Two implementation constraints follow and are normative: the subtraction SHALL saturate rather than underflow (§6 forbids panics in production code), and a `reviewed` timestamp **in the future** SHALL fail the gate — a register claiming review at a time that has not occurred is malformed, not fresh.
+
+#### The registers, restated
+
+| Register | Declares | Primary requirement |
+|---|---|---|
+| `ToolGenome` | what BROKKR may invoke, and the authority each tool exercises | OQGF-M-13, M-11 conjunct 3 |
+| `Cbom` | what cryptography BROKKR contains, typed and as CycloneDX | OQGF-G-1, G-5 |
+| `Aibom` | what models BROKKR reasons with, incl. prompt and corpus digests | OQGF-G-2 |
+| `EndpointRegistry` | where those models live and on what terms | OQGF-M-5, M-6 |
+| `RootsOfTrust` | whose signatures BROKKR will believe | OQGF-M-8 |
+| `PolicyRegister` | which invariants bind and which algorithms are disallowed | OQGF-G-8, G-4, M-10 |
 
 **The AIBOM (OQGF-G-2)** requires an inventory of *models, weights provenance, frameworks, licenses, and — explicitly — prompts and system messages.* For BROKKR: the model each endpoint serves, its version and provider, and the digests of the governance corpus and system prompts it is given. **A swapped model is a genome change. A changed system prompt is a genome change.** Neither is an invisible configuration edit.
 
-**The Endpoint Registry (new)** is where OQGF-M-5 becomes structural. `client_cert` is a required field, not an `Option`. **An endpoint that cannot present a client certificate is not something this type can represent** — so "we'll just use the public API with a bearer token" is not a shortcut available to anyone, including a future maintainer in a hurry. It is not policy. It is the absence of a constructor.
+**The Endpoint Registry** is where OQGF-M-5 becomes structural. `client_cert` is a required field, not an `Option`. **An endpoint that cannot present a client certificate is not something this type can represent** — so "we'll just use the public API with a bearer token" is not a shortcut available to anyone, including a future maintainer in a hurry. It is not policy. It is the absence of a constructor.
 
 **OQGF-M-6 is not folded into OQGF-R-2.** They ask different questions. R-2 asks *can you leave?* M-6 asks *should you have come?* A provider you can switch away from tomorrow may still be one whose jurisdictional exposure makes it wrong to send regulated source code to today. For a federal buyer, jurisdictional exposure is the first question asked, not the last.
 
-**The gate (OQGF-G-4).** No BROKKR release is promoted without a present, signed CBOM, AIBOM, and Endpoint Registry, free of disallowed algorithms and with **no stale trust score**. A **Deterministic Gate** under OQGF-P-2: fail-closed, non-suppressible. The only sanctioned path past a finding is an Accountable Risk Acceptance (§6.5) that keeps the finding visible.
+#### The promotion gate (OQGF-G-4)
+
+A **Deterministic Gate** under OQGF-P-2: fail-closed, non-suppressible. The only sanctioned path past a finding is an Accountable Risk Acceptance (§6.5) that keeps the finding visible. Rev 1.4 states its predicates explicitly, because "free of disallowed algorithms and no stale trust score" was not previously computable from the committed types:
+
+| # | Predicate | Fails when |
+|---|---|---|
+| 1 | **All six registers present** | any register absent — unrepresentable by type (I-10), so this is a type-level guarantee, not a runtime check |
+| 2 | **Every register signature verifies** | any register's `DualSignature` fails dual-family verification against the genome owner's declared root |
+| 3 | **No disallowed algorithm** | `cbom.algorithms` intersects `policy.disallowed` (OQGF-G-4) |
+| 4 | **No stale trust score** | any endpoint's `trust_score.reviewed` is older than 90 days, or is in the future (OQGF-M-6) |
+| 5 | **Every declared tool's capabilities are declared** | a `ToolEntry` names a capability the intent vocabulary does not recognize |
+| 6 | **Every policy invariant is well-formed** | an `InvariantEntry` forbids a capability no tool declares, or declares neither a forbidden capability nor a forbidden privilege (a predicate that can never fire is a policy error, not a permissive default) |
+
+**Predicate 6 is deliberately strict.** An invariant that cannot fire is worse than absent: it reads as protection in the register while enforcing nothing. Failing promotion on it makes the emptiness visible while a human is looking.
 
 ### 6.3 SKULD — the Intent Provenance Chain
 
@@ -835,6 +952,8 @@ Named, not claimed eliminated.
 - **Attestation is not verified as attestation.** *(New in Rev 1.3.)* At Phase 4, Signal 1 proves key possession for a declared identity; it does not verify `Attestation.measurements` against expected platform state, and no attestation issuer exists. OQGF-M-1 is PARTIAL. Closing it requires an issuer, a committed attestation signed-content encoding, and a measurement-expectation source (§6.4).
 - **Two of OQGF-M-11's four conjuncts are not yet enforced.** *(New in Rev 1.3.)* Action-in-scope and action-respects-invariants are deferred pending the tool-to-capability vocabulary (REGIN, Phase 5) and an invariant-evaluator seam. Bounded by the **Deferred-Conjunct Deadline** (§6.4): both SHALL be enforced before the executor is wired at Phase 11.
 - **Declared roots of trust are pre-shared.** *(New in Rev 1.3.)* Trust in a hop's key rests on out-of-band registration, not on a hardware root of trust certifying that key at attestation time (§6.4.1).
+- **Detail-level invariants are not evaluated.** *(New in Rev 1.4.)* The policy register expresses invariants computable from the signed registers — forbidden capabilities and forbidden privilege classes. An invariant requiring interpretation of `Action.detail` (a path rule such as *read-only outside ./src*, or a content rule such as *no secret material in committed output*) is **not** expressible and is not enforced. Building it requires a path/content policy language and the tool-schema language it depends on; both are later work. SINDRI fails closed on any invariant it cannot evaluate, and Root Intent construction refuses an undeclared invariant (§6.2). Tracked as the open half of RISK-2026-0004.
+- **The vendor reconciliation pass rate is unmeasured.** *(New in Rev 1.4.)* OQGF-M-6's fifth factor is placed in the type but cannot be sourced until HEIMDALL performs cross-hop reconciliation (OQGF-M-12, Phase 8). Until then the field carries a declared placeholder and **OQGF-M-6 is PARTIAL** (§14) — four factors declared, one awaiting measurement.
 
 ---
 
@@ -842,13 +961,13 @@ Named, not claimed eliminated.
 
 | OQGF requirement | BROKKR hook |
 |---|---|
-| OQGF-G-1 (CBOM) | `brokkr-genome::Cbom`, CycloneDX 1.6; `cargo-cyclonedx` |
+| **OQGF-G-1 (CBOM)** | **`brokkr-genome::Cbom` — CycloneDX 1.6 export PLUS a typed `algorithms` inventory the promotion gate evaluates (§6.2, Rev 1.4)** |
 | OQGF-G-2 (AIBOM) | `brokkr-genome::Aibom` — model identity, version, provider, prompt and corpus digests |
 | OQGF-G-3 (signed artifacts) | `Genome::signature` dual-family; artifacts embed CBOM/AIBOM digests |
-| OQGF-G-4 (non-bypassable gate) | `brokkr-genome` promotion gate (Deterministic) |
+| **OQGF-G-4 (non-bypassable gate)** | **`brokkr-genome` promotion gate (Deterministic) — six predicates stated in §6.2: registers present, signatures verify, no disallowed algorithm, no stale trust score, capabilities declared, invariants well-formed** |
 | OQGF-G-5 (crypto agility) | `brokkr-crypto` negotiation layer; typed enums, no strings |
 | **OQGF-G-7 (Mosca)** | **§6.11 — AES-256 purpose declared; X=7, Y=1, Z=2030; ML-KEM-established keys from first commit** |
-| OQGF-G-8 (policy as code) | Signed channel-strength and classification policy in the Endpoint Registry |
+| **OQGF-G-8 (policy as code)** | **`brokkr-genome::PolicyRegister` — signed invariant predicates and the disallowed-algorithm list (§6.2, Rev 1.4); plus channel-strength and classification policy in the Endpoint Registry** |
 | OQGF-G-9 (BOM regeneration) | Regenerated and re-signed on every release; seven-year retention |
 | **OQGF-I-1 (HNDL sentinel)** | **`brokkr-bifrost` — negotiated-group readback; HNDL risk event on classical exchange** |
 | **OQGF-I-2 (classical TLS)** | **`ChannelStrength::Classical` → graded risk event; Deny after 2030 by signed policy** |
@@ -860,10 +979,10 @@ Named, not claimed eliminated.
 | **OQGF-M-1 (attestation)** | **PARTIAL — `Attestation` per hop. SINDRI verifies key possession for a declared root of trust (§6.4.1) and binds identity to the chain's proven hop; `measurements` are not verified and no issuer exists (§6.4, §13)** |
 | OQGF-M-4 (short-lived creds) | Root Intent freshness and expiry (OQGF-M-14) |
 | **OQGF-M-5 (mutual auth)** | **`ModelEndpoint::client_cert` required at registration. One-sided TLS is unrepresentable (I-11)** |
-| **OQGF-M-6 (vendor trust score)** | **`brokkr-genome::VendorTrustScore` — quarterly, gate-blocking when stale. Distinct from R-2** |
+| **OQGF-M-6 (vendor trust score)** | **PARTIAL — `brokkr-genome::VendorTrustScore`; all five M-6 factors placed incl. `reconciliation_pass_rate` (Rev 1.4), but that factor is unmeasured until HEIMDALL (Phase 8). Stale after 90 days; gate-blocking. Distinct from R-2** |
 | OQGF-M-8 … M-14 (AMD-001) | `brokkr-intent` (SKULD). **Chain verified in SINDRI via `Skuld::verify_chain_public` against declared public roots of trust (§6.4.1)** |
-| **OQGF-M-11 (costimulation)** | **PARTIAL at Phase 4 — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. Signals 1 and 2 enforced; action-in-scope and action-respects-invariants deferred under the Deferred-Conjunct Deadline (§6.4)** |
-| **OQGF-M-10 (invariant enforcement)** | **PARTIAL — accumulation and non-removal enforced in SKULD; evaluation of an action against the accumulated set deferred (§6.4)** |
+| **OQGF-M-11 (costimulation)** | **PARTIAL — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. Signals 1-2 enforced at Phase 4. Conjunct 3 (action-in-scope) becomes computable via `ToolEntry::required_capabilities` and conjunct 4 via `PolicyRegister` (§6.2, Rev 1.4); both SHALL be enforced before Phase 11 (Deferred-Conjunct Deadline, §6.4)** |
+| **OQGF-M-10 (invariant enforcement)** | **PARTIAL — accumulation and non-removal enforced in SKULD; action-evaluation lands via `PolicyRegister` for DECLARATIVE invariants (§6.2, Rev 1.4); detail-level invariants remain unevaluated (§13)** |
 | OQGF-M-12 (reconciliation) | `brokkr-sentinel` cross-hop reconciliation |
 | OQGF-A (accountability) | `brokkr-audit` (SAGA) — dual-signed append-only, re-signing, signed export |
 | **OQGF-A.6.1 (IR triggers)** | **§11 — four triggers emitted; the plan is organizational** |
@@ -882,11 +1001,26 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new or amended in Rev 1.2 and Rev 1.3.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amends the M-1, M-8…M-14, M-10, and M-11 rows per §6.4 and §6.4.1.
+**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amends the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2.
 
 ---
 
 ## 15. Change log
+
+**Rev 1.4 — 27 July 2026. Places the Phase-5 REGIN surface: two additional signed registers, the tool-to-capability binding, and the promotion gate's predicates. Discharges the buildable half of RISK-2026-0004. Every change adds or tightens; nothing is relaxed.**
+
+Rev 1.3 deferred two of OQGF-M-11's four conjuncts because the committed types could not express them, and bound that deferral with a deadline gating Phase 11. Rev 1.4 places the surfaces that make them computable — **in the genome, where the vocabulary belongs**, not in the gate that consumes it.
+
+- **§6.2 replaced. Four registers become six.** The **roots-of-trust register** (`RootsOfTrust`) was assigned to REGIN by Rev 1.3 §6.4.1 but never written into §6.2; it is now a first-class signed register, `SelfModifying`, declaring whose signatures BROKKR will believe. It holds **raw public-key bytes rather than `DualPublicKey`** — a dependency fact, since a core register holding a `brokkr-crypto` type would invert I-5's direction. The **policy register** (`PolicyRegister`) carries signed invariant predicates and the disallowed-algorithm list, satisfying OQGF-G-8's "policy expressed as code, version-controlled, signed."
+- **The tool-to-capability binding is placed (`ToolEntry::required_capabilities`).** This is what Rev 1.3's conjunct 3 was missing: `Action` names a `ToolId`, scope is a set of `Capability`, and no committed conversion existed. It is placed in the **signed tool register**, so that "`write_file` exercises the `write` capability" is a reviewable, diffable, DAP-attributable governance statement rather than an implementation detail inside the gate. **An undeclared tool is a denied tool** — the register is a closed vocabulary and absence is denial.
+- **Conjunct 4 is placed for declarative invariants only, and the boundary is stated.** An `InvariantEntry` forbids capabilities and privilege classes — computable from the signed registers alone. An invariant requiring interpretation of `Action.detail` (a path or content rule) is **not expressible and is not enforced**; building it would mean designing a path-policy language and the tool-schema language beneath it inside REGIN's first build, with less information than later phases will have. **Rev 1.4 declines to invent it and records it as a residual (§13)** rather than shipping a predicate that looks like enforcement.
+- **Undeclared invariants fail loudly, then fail closed.** A Root Intent SHALL NOT be constructed carrying an invariant the policy register does not declare — the loud failure, at authoring time, with a human present. SINDRI additionally denies at runtime on any invariant it cannot evaluate. The direction is deliberate and its cost is stated: **a malformed policy register denies work rather than permitting it**, which is OQGF-P-2's non-suppressible posture applied to policy.
+- **The CBOM carries a typed algorithm inventory.** OQGF-G-4 requires the gate to prove an artifact free of disallowed algorithms; the CycloneDX document is an opaque string, and a **Deterministic** gate must not depend on document parsing. The typed inventory is what the gate evaluates (OQGF-G-5's typed-identifier rule, applied to the register the gate reads); CycloneDX remains the interchange artifact. The two SHALL agree.
+- **A conformance gap in OQGF-M-6 is corrected.** M-6's normative text names five factors, the fifth being **statistical reconciliation pass rate**. Rev 1.2's `VendorTrustScore` carried four and substituted `data_handling` for the fifth. `data_handling` is a tightening and is retained; the missing factor is **placed**. It is found by auditing the genome types against the corpus rather than against the traceability table — the same non-circular discipline §5.3 of the build rules requires of conformance checks. **It cannot be populated until HEIMDALL measures it (OQGF-M-12, Phase 8), so M-6 is recorded PARTIAL** rather than counted as satisfied on the strength of a placeholder.
+- **The promotion gate's predicates are stated (six, §6.2).** "Free of disallowed algorithms and no stale trust score" was not computable from the committed types. It now is: staleness is **`now - reviewed` exceeding 90 days**, on the epoch-millisecond `Timestamp` already committed, with two normative constraints — the subtraction SHALL saturate rather than underflow, and a `reviewed` timestamp **in the future SHALL fail the gate**, because a register claiming review at a time that has not occurred is malformed, not fresh. Predicate 6 fails an invariant that can never fire: **an invariant that cannot fire is worse than absent**, reading as protection while enforcing nothing.
+- **§13 and §14 updated** with two new residuals and six amended traceability rows.
+
+**What this does not do.** Rev 1.4 places surfaces; it does not build them. Each is a `brokkr-core` type change, which under §5.2 of the build rules is a scoped revision of a committed crate — placed here, implemented in its own commit, and only then consumed by Phase 5. And it closes neither deferred conjunct: it makes conjunct 3 fully computable and conjunct 4 computable **for declarative invariants only**. RISK-2026-0004 is **reduced, not closed**, and the Deferred-Conjunct Deadline continues to gate Phase 11.
 
 **Rev 1.3 — 24 July 2026. Disposes GAP-2026-07-24-001 and GAP-2026-07-24-002, both filed by the builder at the Phase 4 surface check, before any gate code was written. This revision defers enforcement and does not claim to be add-only.**
 
@@ -932,4 +1066,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.3.
+— End of BROKKR technical architecture, Rev 1.4.
