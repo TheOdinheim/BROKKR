@@ -4,7 +4,7 @@
 # (I-5), and the dependency direction is one-way.
 [workspace]
 resolver = "3"
-members = ["brokkr-core", "brokkr-crypto", "brokkr-intent"]
+members = ["brokkr-core", "brokkr-crypto", "brokkr-intent", "brokkr-gate"]
 
 [workspace.package]
 version = "0.1.0"

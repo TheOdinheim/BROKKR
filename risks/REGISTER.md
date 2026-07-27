@@ -105,7 +105,7 @@ in Phase 2 stands; this risk covers only what Phase 2 explicitly could not guara
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
 | **plan.target** | Phase 4 prerequisite (before SINDRI verifies chains it did not sign) |
-| **plan.status** | ~~`TreatmentStatus::Open`~~ → **`TreatmentStatus::Executed`** (17 Jul 2026, Phase 2 revision — type added; 20 Jul 2026, Phase 3 revision — SKULD verify path added; see UPDATEs below). Residual **still Open**, target Phase 4 (SINDRI wiring) |
+| **plan.status** | ~~`TreatmentStatus::Open`~~ → **`TreatmentStatus::Executed`** (17 Jul 2026, Phase 2 revision — type added; 20 Jul 2026, Phase 3 revision — SKULD verify path added; **24 Jul 2026, Phase 4 — SINDRI wiring landed**; see UPDATEs below). Wiring residual **CLOSED**; the Option-B pre-shared-roots residual is carried by RISK-2026-0005, not here |
 | **mitigation** | Add a `DualPublicKey` type to `brokkr-crypto` (`from_public_bytes` + a verify path independent of the private keypair), so `verify_chain` and SINDRI can verify with public roots of trust only. Not an amendment-gap — the framework is clear; the type is missing. |
 | **residual (required by type)** | After the type is added: verification uses public roots of trust. Residual = the *provenance* of those public keys still depends on OQGF-M-1 attestation (HW root of trust) being valid — a bounded dependency verified at the gate (Phase 4), re-assessed when SINDRI wires attestation→public-key. Residual `likelihood: Unlikely`, `impact: Major`. |
 
@@ -142,10 +142,36 @@ public roots of trust (`DualPublicKey`), no private material, identical semantic
   closed** until SINDRI wires attestation→public-key→verify. OQGF-M-8 in `CONF-2026-07-16-P3-R1`
   stays **partial** until then.
 
+**UPDATE — 24 July 2026 (Phase 4, `reports/PHASE-4-2026-07-24-R2.md`):** the **wiring is now
+DONE**. `brokkr-gate` (SINDRI) resolves the root's and every hop's `DualPublicKey` through the
+`KeyResolver` seam and calls `Skuld::verify_chain_public(root, entries, &root_pub, &hop_refs,
+now)` in Signal 2. Proven by the Phase-4 suite (`test_oqgf_m_11_valid_costimulation_grants`,
+`test_unresolvable_hop_is_anergy`, `test_tampered_entry_signature_is_anergy`,
+`test_broken_hash_link_is_anergy`; `CONF-2026-07-24-P4-R2.md`, `FUNC-2026-07-24-R1.md`). The
+Phase-4 wiring residual this entry tracked is therefore **executed**. What remains is a
+**different, named residual — not this one**:
+
+- **Residual (re-dispositioned — the wiring residual is CLOSED; a provenance residual remains
+  under Option B):** SINDRI now verifies chains against **declared roots of trust** supplied by
+  a `RegistryResolver` (Option B, ARCH §6.4.1). The remaining exposure is that those roots are
+  **pre-shared** — trust rests on out-of-band registration, not on a hardware root of trust
+  certifying the key at attestation time. This is **not** the "SINDRI is not yet wired" residual
+  (that is closed); it is the platform-attestation / pre-shared-roots residual already tracked
+  as **RISK-2026-0005** and named in ARCH §13. To avoid double-tracking, the provenance residual
+  lives in RISK-2026-0005; **RISK-2026-0003's own residual is now closed by the Phase-4 wiring.**
+  OQGF-M-8's gate-verification half moves from **partial** toward **satisfied** in
+  `CONF-2026-07-24-P4-R2` (Option B), with the pre-shared-roots residual explicit; the
+  standing `CONF-2026-07-16-P3-R1` verdict is superseded for that half by the Phase-4 record.
+- Disposition: `Disposition::Reduce`, **plan.status → Executed** (the wiring landed); the risk is
+  **Reduced, wiring residual closed**, with the remaining provenance concern carried by
+  RISK-2026-0005 (not re-counted here). `likelihood: Unlikely`, `impact: Major`.
+
 **Provenance note:** Raised by the Phase 3 records correction. The Phase 3 chain cryptography
 (canonical serialization, dual-family signing, hash-linking, freshness) stands and is tested;
-this risk covered the verifier-side key material `brokkr-crypto` did not yet expose — now
-added by this revision, with the wiring residual carried forward to Phase 4.
+this risk covered the verifier-side key material `brokkr-crypto` did not yet expose — added by
+the Phase 2 revision, the SKULD verify path by the Phase 3 revision, and the SINDRI wiring by
+Phase 4. The wiring residual is now closed; the Option-B pre-shared-roots residual is tracked as
+RISK-2026-0005.
 
 ---
 

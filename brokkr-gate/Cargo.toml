@@ -1,0 +1,16 @@
+[package]
+name = "brokkr-gate"
+description = "SINDRI — the Costimulation Gate (OQGF-M-11), at the Phase-4 scope placed by Architecture Rev 1.3: enforces Signal 1 (identity) and Signal 2 (Intent Provenance Chain). Conjuncts 3-4 (action-in-scope, action-respects-invariants) are deferred under the Deferred-Conjunct Deadline. Pure logic, no unsafe; SINDRI supplies only the verdict and can never mint an AuthorizedAction (I-1)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The verdict logic depends on the types (brokkr-core), the chain verifier
+# (brokkr-intent::Skuld::verify_chain_public), and the public-key type (brokkr-crypto).
+# I-5: it must NOT depend on brokkr-reasoner/brokkr-tools/brokkr-cli. I-6: no model calls.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-intent = { path = "../brokkr-intent" }
+brokkr-crypto = { path = "../brokkr-crypto" }
