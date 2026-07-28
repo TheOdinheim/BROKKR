@@ -1,0 +1,15 @@
+[package]
+name = "brokkr-genome"
+description = "REGIN — the Genome and the OQGF-G-4 promotion gate (§6.2). Canonical serialization of the six signed registers, non-circular dual-family signature verification, and the six deterministic promotion predicates. A fail-closed, non-suppressible Deterministic Gate; pure logic, no unsafe. Phase 5."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The gate serializes and verifies the committed genome types (brokkr-core) and checks
+# dual-family signatures with the public-key type (brokkr-crypto).
+# I-5: it must NOT depend on brokkr-reasoner/brokkr-tools/brokkr-cli. I-6: no model calls.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }

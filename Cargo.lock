@@ -23,6 +23,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "brokkr-genome"
+version = "0.1.0"
+dependencies = [
+ "brokkr-core",
+ "brokkr-crypto",
+]
+
+[[package]]
 name = "brokkr-intent"
 version = "0.1.0"
 dependencies = [
