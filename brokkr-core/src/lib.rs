@@ -116,7 +116,10 @@ pub mod tolerance;
 pub use adapt::{
     AdaptError, DetectorProvenance, MaturationPipeline, RefinedDetector, SeedingIncident,
 };
-pub use barrier::{Barrier, BarrierFinding, BarrierVerdict, BoundaryFlow, Destination};
+pub use barrier::{
+    Barrier, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow, ContextClass,
+    Destination, DestinationClass,
+};
 pub use classification::{ChannelStrength, Classification, NamedGroup, effective_authorization};
 pub use crypto::{
     Attestation, CryptoError, Digest, DualSignature, HashAlg, Hasher, KemAlg, Signature,

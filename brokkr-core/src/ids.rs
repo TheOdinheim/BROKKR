@@ -39,6 +39,8 @@ string_id! {
     TrustAnchor,
     /// A reference to a datum crossing a boundary (AMD-007).
     DatumRef,
+    /// The provenance root recorded on a Boundary Custody Record (AMD-007, OQGF-I-9).
+    OriginId,
 }
 
 /// Epoch milliseconds. Substitutes `std::time::SystemTime` for `no_std`.
