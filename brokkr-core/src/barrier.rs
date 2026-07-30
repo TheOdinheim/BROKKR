@@ -6,6 +6,7 @@ use crate::crypto::DualSignature;
 use crate::ids::{
     DatumRef, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp,
 };
+use crate::personal_data::{Purpose, RetentionPeriod};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -96,6 +97,24 @@ pub enum ContextClass {
     NonPrivileged,
 }
 
+/// Personal Data's governed dimension (OQGF-P-11.1). It **composes with** [`Classification`]
+/// and is **orthogonal** to it — never a tier of it, never a variant of it.
+///
+/// **Orthogonality is the requirement, not a modelling preference.** A datum may be Public
+/// *and* personal, and that combination is precisely the one a sensitivity-only model gets
+/// wrong. A `Classification::Personal` variant would make "Public and personal"
+/// inexpressible and would satisfy the sensitivity gate while defeating the lifecycle one —
+/// so the tag is a **separate type**, presence of which (`Option<PersonalDataTag>`) triggers
+/// the lifecycle obligations at every tier, Public included. It carries the two committed
+/// value types a Personal-Data crossing needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonalDataTag {
+    /// The declared reason this data was collected (OQGF-P-11.3).
+    pub purpose: Purpose,
+    /// The declared span it may be held, tied to the Purpose (OQGF-P-11.4).
+    pub retention: RetentionPeriod,
+}
+
 /// A Boundary Custody Record — a bill of materials for data in transit, sibling to the
 /// CBOM (OQGF-G-1) and AIBOM (OQGF-G-2), and the secretory-IgA analog: a mark that travels
 /// with the material and states something verifiable about it (OQGF-I-9).
@@ -115,6 +134,9 @@ pub struct BoundaryCustodyRecord {
     pub origin: OriginId,
     /// The destinations this record pre-authorizes — coarsely (see [`DestinationClass`]).
     pub authorized: Vec<DestinationClass>,
+    /// The declared Purpose and Retention Period, where this datum is Personal Data
+    /// (OQGF-P-11.3, OQGF-P-11.4). `None` for data that is not personal.
+    pub personal: Option<PersonalDataTag>,
     pub issued: Timestamp,
     pub expiry: Timestamp,
     pub signature: DualSignature,
@@ -135,6 +157,12 @@ pub enum BoundaryFlow {
     Egress {
         datum: DatumRef,
         classification: Classification,
+        /// Orthogonal to `classification`, never a tier of it (OQGF-P-11.1). Declared on
+        /// the **flow**, not only on the record: without it `evaluate` cannot distinguish a
+        /// Public personal datum from a Public ordinary one when no BCR is presented — which
+        /// is exactly what corrected condition 1 short-circuits on (§6.5). The field is what
+        /// makes that fix expressible.
+        personal: Option<PersonalDataTag>,
         destination: Destination,
         bcr: Option<BoundaryCustodyRecord>,
     },
@@ -142,6 +170,7 @@ pub enum BoundaryFlow {
     /// responds to (OQGF-I-11).
     Ingress {
         datum: DatumRef,
+        personal: Option<PersonalDataTag>,
         bcr: Option<BoundaryCustodyRecord>,
         context: ContextClass,
     },

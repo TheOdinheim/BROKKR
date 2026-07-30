@@ -118,7 +118,7 @@ pub use adapt::{
 };
 pub use barrier::{
     Barrier, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow, ContextClass,
-    Destination, DestinationClass,
+    Destination, DestinationClass, PersonalDataTag,
 };
 pub use classification::{ChannelStrength, Classification, NamedGroup, effective_authorization};
 pub use crypto::{
