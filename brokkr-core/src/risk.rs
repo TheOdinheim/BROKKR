@@ -14,7 +14,7 @@
 //! type surface only.
 
 use crate::crypto::DualSignature;
-use crate::ids::{Dap, RiskAcceptanceId, Timestamp};
+use crate::ids::{Dap, FindingId, Timestamp};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -24,13 +24,18 @@ string_id! {
     RiskId,
 }
 
-/// The two Deterministic Gates a [`RiskAcceptance`] may attach to (OQGF-G-4, OQGF-M-1).
+/// The Deterministic Gates a [`RiskAcceptance`] may attach to (OQGF-G-4, OQGF-M-1,
+/// OQGF-I-10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeterministicGateId {
     /// The Genetic-Layer promotion gate (OQGF-G-4).
     Genome,
     /// The MHC attestation gate (OQGF-M-1).
     Mhc,
+    /// The HÚÐ egress barrier (OQGF-I-10; added Rev 1.8). A barrier finding recorded with
+    /// `gate: None` would be misfiled: `None` means a **non-gate** risk (OQGF-P-10.4), so a
+    /// Deterministic-Gate finding would read as though no gate had caught it.
+    Barrier,
 }
 
 /// The AMD-006 (OQGF-P-9) accountable risk-acceptance record. Created in this revision
@@ -38,8 +43,14 @@ pub enum DeterministicGateId {
 /// Gate finding `gate` is `Some(_)`; for a non-gate risk (OQGF-P-10.4) it is `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RiskAcceptance {
-    /// The still-visible finding this acceptance proceeds past.
-    pub finding: RiskAcceptanceId,
+    /// The still-visible finding this acceptance proceeds past, named by the identity
+    /// [`BarrierFinding::finding_id()`](crate::barrier::BarrierFinding::finding_id)
+    /// produces (OQGF-P-9.2). **Retyped from `RiskAcceptanceId` to `FindingId` in Rev 1.8:**
+    /// `RiskAcceptanceId` is also what [`BarrierVerdict::AcceptedRisk`](crate::barrier::BarrierVerdict)'s
+    /// `entry` carries — the acceptance entry's **own** id — so one type served two
+    /// referents, and no type meant *a finding*. That muddle is why the finding-to-acceptance
+    /// link read as missing.
+    pub finding: FindingId,
     /// The gate the finding was caught at, or `None` for a non-gate risk (OQGF-P-10.4).
     pub gate: Option<DeterministicGateId>,
     /// The accountable party (OQGF-A-5). Reuses the existing `Dap` type.

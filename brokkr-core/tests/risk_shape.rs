@@ -9,7 +9,7 @@
 //! `brokkr_core::risk::Disposition`.
 
 use brokkr_core::crypto::{DualSignature, Signature, SignatureAlg};
-use brokkr_core::ids::{Dap, RiskAcceptanceId, Timestamp};
+use brokkr_core::ids::{Dap, FindingId, Timestamp};
 use brokkr_core::personal_data::{Purpose, RetentionPeriod};
 use brokkr_core::risk::{
     DeterministicGateId, Disposition, Impact, Likelihood, RiskAcceptance, RiskEntry, RiskId,
@@ -36,7 +36,7 @@ fn dap() -> Dap {
 
 fn gate_acceptance() -> RiskAcceptance {
     RiskAcceptance {
-        finding: RiskAcceptanceId::new("ra-1"),
+        finding: FindingId::new("ra-1"),
         gate: Some(DeterministicGateId::Genome),
         dap: dap(),
         justification: "quantum-vulnerable dependency; removal scheduled".into(),
@@ -66,7 +66,7 @@ fn test_p10_accept_holds_a_risk_acceptance() {
     });
     match entry.disposition {
         Disposition::Accept { acceptance } => {
-            assert_eq!(acceptance.finding, RiskAcceptanceId::new("ra-1"));
+            assert_eq!(acceptance.finding, FindingId::new("ra-1"));
             assert_eq!(acceptance.gate, Some(DeterministicGateId::Genome));
             assert_eq!(acceptance.dap, dap());
         }

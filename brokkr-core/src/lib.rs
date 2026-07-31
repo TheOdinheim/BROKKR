@@ -117,8 +117,8 @@ pub use adapt::{
     AdaptError, DetectorProvenance, MaturationPipeline, RefinedDetector, SeedingIncident,
 };
 pub use barrier::{
-    Barrier, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow, ContextClass,
-    Destination, DestinationClass, PersonalDataTag,
+    Barrier, BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
+    ContextClass, Destination, DestinationClass, PersonalDataTag,
 };
 pub use classification::{ChannelStrength, Classification, NamedGroup, effective_authorization};
 pub use crypto::{

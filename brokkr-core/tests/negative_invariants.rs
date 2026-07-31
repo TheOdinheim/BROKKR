@@ -12,15 +12,15 @@ use brokkr_core::adapt::{
     AdaptError, DetectorDelta, DetectorProvenance, DetectorSpecBase, EvaluationCorpus,
     MaturationPipeline, PriorGeneration, RefinedDetector, SeedingIncident, SelectionPass,
 };
-use brokkr_core::barrier::{BarrierFinding, BarrierVerdict, Destination};
+use brokkr_core::barrier::{BarrierCondition, BarrierFinding, BarrierVerdict, Destination};
 use brokkr_core::classification::{
     ChannelStrength, Classification, NamedGroup, effective_authorization,
 };
 use brokkr_core::gate::{Action, AnergyReason, AuthorizationDecision, CostimulationGate};
 use brokkr_core::genome::{ModelEndpoint, VendorTrustScore};
 use brokkr_core::ids::{
-    ClientCertRef, CorpusVersion, DetectorId, EscalationId, GrantId, IncidentId, ModelEndpointId,
-    ModelIdentity, Score, SelfSetVersion, Timestamp, ToolId, TrustAnchor,
+    ClientCertRef, CorpusVersion, DatumRef, DetectorId, EscalationId, GrantId, IncidentId,
+    ModelEndpointId, ModelIdentity, Score, SelfSetVersion, Timestamp, ToolId, TrustAnchor,
 };
 use brokkr_core::intent::{
     AttenuationError, Capability, IntentProvenanceChain, IntentScope, Invariant, InvariantSet,
@@ -171,6 +171,8 @@ fn test_i1_authorize_is_sole_construction_path() {
 fn test_i2_deny_is_distinct_and_has_no_path_to_allow() {
     let deny = BarrierVerdict::Deny {
         finding: BarrierFinding {
+            datum: DatumRef::new("d-1"),
+            condition: BarrierCondition::UnauthorizedDestination,
             classification: Classification::Secret,
             reason: "secret to unauthorized destination".into(),
         },
@@ -517,6 +519,8 @@ impl ContextClearance for DenyClearance {
     fn evaluate_context(&self, _ctx: &Context, _dest: &Destination) -> BarrierVerdict {
         BarrierVerdict::Deny {
             finding: BarrierFinding {
+                datum: DatumRef::new("d-2"),
+                condition: BarrierCondition::ChannelStrengthCollapse,
                 classification: Classification::Secret,
                 reason: "secret to reasoner over insufficient channel".into(),
             },
@@ -582,4 +586,78 @@ fn test_effective_authorization_collapses_over_classical_channel() {
     assert!(NamedGroup::X25519MlKem768.is_pqc_hybrid());
     assert_eq!(NamedGroup::X25519MlKem768.code_point(), 4588);
     assert_eq!(NamedGroup::Secp384r1MlKem1024.code_point(), 4589);
+}
+
+// ---------------------------------------------------------------------------
+// OQGF-P-9.2 — a barrier finding's identity is deterministic, injective over
+// (datum, condition), and independent of classification and reason (Rev 1.8).
+// ---------------------------------------------------------------------------
+
+fn finding(
+    datum: &str,
+    condition: BarrierCondition,
+    classification: Classification,
+    reason: &str,
+) -> BarrierFinding {
+    BarrierFinding {
+        datum: DatumRef::new(datum),
+        condition,
+        classification,
+        reason: reason.into(),
+    }
+}
+
+#[test]
+fn test_oqgf_p_9_2_finding_id_is_deterministic() {
+    // A DAP issues an acceptance BEFORE the crossing; the same finding must yield the same
+    // id every time, or advance acceptance is impossible.
+    let f = finding(
+        "dep-42",
+        BarrierCondition::SignatureInvalid,
+        Classification::Secret,
+        "bad sig",
+    );
+    assert_eq!(f.finding_id(), f.finding_id());
+}
+
+#[test]
+fn test_oqgf_p_9_2_finding_id_injective_over_datum_and_condition() {
+    let f = |d, c| finding(d, c, Classification::Secret, "r");
+    // Different datum, same condition -> different ids.
+    assert_ne!(
+        f("a", BarrierCondition::Expired).finding_id(),
+        f("b", BarrierCondition::Expired).finding_id(),
+    );
+    // Same datum, different condition -> different ids.
+    assert_ne!(
+        f("a", BarrierCondition::Expired).finding_id(),
+        f("a", BarrierCondition::DatumMismatch).finding_id(),
+    );
+    // Separator-collision robustness: a DatumRef that contains the ':' separator (and even
+    // a condition tag's text) must not collide with a shorter datum. The length prefix
+    // bounds the datum, so a bare "datum:tag" ambiguity cannot arise.
+    assert_ne!(
+        f("a", BarrierCondition::Expired).finding_id(),
+        f("a:expired", BarrierCondition::Expired).finding_id(),
+    );
+}
+
+#[test]
+fn test_oqgf_p_9_2_finding_id_ignores_classification_and_reason() {
+    // `reason` is explanatory and OUTSIDE the match key; `classification` is not part of
+    // the id. Two findings differing ONLY in those fields share an id — the property a
+    // future refactor is most likely to break silently.
+    let a = finding(
+        "d",
+        BarrierCondition::UnauthorizedDestination,
+        Classification::Public,
+        "one wording",
+    );
+    let b = finding(
+        "d",
+        BarrierCondition::UnauthorizedDestination,
+        Classification::Secret,
+        "a completely different wording",
+    );
+    assert_eq!(a.finding_id(), b.finding_id());
 }

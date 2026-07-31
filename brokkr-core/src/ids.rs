@@ -41,6 +41,8 @@ string_id! {
     DatumRef,
     /// The provenance root recorded on a Boundary Custody Record (AMD-007, OQGF-I-9).
     OriginId,
+    /// Identity of a Deterministic-Gate finding an acceptance is scoped to (OQGF-P-9.2).
+    FindingId,
 }
 
 /// Epoch milliseconds. Substitutes `std::time::SystemTime` for `no_std`.
