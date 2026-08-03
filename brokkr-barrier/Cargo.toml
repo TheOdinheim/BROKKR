@@ -1,0 +1,15 @@
+[package]
+name = "brokkr-barrier"
+description = "HÚÐ — the Barrier (AMD-007). Deterministic egress gate (nine §6.5 conditions), ingress provenance/quarantine, personal-data lifecycle checks, resolver-supplied endpoint ceiling and risk acceptance (AMD-006). Pure logic, no unsafe; a Deny has no path to Allow (I-2). Phase 6."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The Barrier decides over the committed flow/record types (brokkr-core) and verifies
+# dual-family signatures (brokkr-crypto). I-5: it SHALL NOT depend on brokkr-genome — the
+# endpoint ceiling arrives through an injected trait. I-6: no model calls.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }
