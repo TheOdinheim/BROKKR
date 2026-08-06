@@ -80,7 +80,7 @@ It is recorded here so the obligation is owned and tracked rather than lost in a
 | **owner** | Jeremy Rose (DAP) |
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
-| **plan.target** | Phase 7 (`brokkr-audit`) |
+| **plan.target** | ~~Phase 7 (`brokkr-audit`)~~ → **Pre-production (with a `brokkr-crypto` memory-locking revision before Phase 11)** — DAP decision, 6 Aug 2026; see the DAP-DECISION note below |
 | **plan.status** | `TreatmentStatus::Open` |
 | **mitigation** | Implement durable key destruction in `brokkr-audit`: per-subject key storage that supports verifiable destruction (e.g. keys held only in memory-locked pages excluded from swap, or an HSM-backed key store whose destruction is attestable), plus the OQGF-P-11 erasure tombstone recording that destruction occurred. |
 | **residual (required by type)** | After mitigation: durable destruction implemented and tombstoned. Residual = the destruction is only as durable as the underlying key-storage substrate's guarantees (HSM attestation, OS memory-locking correctness) — a bounded dependency on the storage layer, re-assessed when the Phase 7 mechanism is chosen. Residual `likelihood: Rare`, `impact: Major`. |
@@ -88,6 +88,56 @@ It is recorded here so the obligation is owned and tracked rather than lost in a
 **Provenance note:** This is the durability half of the Phase 1 delta's bucket-C deferral, now a
 *tracked open item with a target phase* rather than a comment. The in-memory zeroization delivered
 in Phase 2 stands; this risk covers only what Phase 2 explicitly could not guarantee.
+
+**UPDATE — 6 August 2026 (Phase 7, `reports/PHASE-7-2026-08-06-R2.md`): partial advance + mitigation
+re-assignment; plan.status remains `Open`.** Phase 7 (`brokkr-audit`) delivered the **erasure-tombstone
+recording** half of the mitigation and no more: a signed, append-only `ErasureTombstone` (erased seq,
+classification, time, DAP) that records destruction occurred, with the erased record preserved and the
+chain intact (`test_oqgf_p_11_5_erasure_preserves_chain`), and — structurally — a re-signed erased record
+that stays irrecoverable (`test_oqgf_p_11_7_resigned_erased_record_stays_irrecoverable`). What Phase 7 did
+**not** deliver is the **durable-key-destruction substrate** the mitigation names (memory-locked pages
+excluded from swap, or an HSM-backed key store with attestable destruction). And Phase 7 **refined where
+that substrate belongs:** the risk's context assigned durable destruction to `brokkr-audit` on the theory
+that it "owns the persisted per-subject key lifecycle" — but ARCH §6.9 / Task 4(ii) (OQGF-P-11.7) require
+SAGA to hold **no** subject key and to have **no** decrypt path, so it can never resurrect erased data.
+Consequently `brokkr-audit` records the tombstone but does **not** own the subject-key store; durable
+destruction is a **`brokkr-crypto` + deployment/key-store** concern (`SubjectKey::shred` zeroizes in
+memory; durability across swap/remanence remains an OS/storage property, unchanged from Phase 2).
+
+- **Substantive risk: unchanged and Open.** In-memory zeroization is still not durable destruction; no
+  memory-locking or HSM-backed store was built this phase.
+- **Plan re-targeting flagged to the DAP.** `plan.target` was Phase 7; the durable-destruction half is
+  not a `brokkr-audit` deliverable. It needs re-targeting to the key-store/deployment layer (an HSM-backed
+  or memory-locked subject-key store with attestable destruction), which no built phase yet owns. This is
+  a governance decision for the DAP, recorded here rather than silently re-assigned.
+- **Residual (unchanged):** durability is only as strong as the eventual key-storage substrate's
+  guarantees; residual `likelihood: Rare`, `impact: Major`, re-assessed when the substrate mechanism is
+  chosen and its owning phase is set.
+
+**DAP-DECISION — 6 August 2026 (treatment target set; annotation per §8, the Phase 7 UPDATE above stands
+unchanged).** The `plan.target` re-targeting the Phase 7 UPDATE flagged is now decided: **Pre-production,
+with a `brokkr-crypto` memory-locking revision landing before Phase 11.** `plan.status` remains `Open`;
+`likelihood` (`Unlikely`), `impact` (`Major`), and `disposition` (`Reduce`) are unchanged. The mitigation
+splits into two named halves:
+
+- **Architectural half — `brokkr-crypto`.** Allocate subject-key material in memory-locked pages excluded
+  from swap, plus a seam for an external key store with attestable destruction. This is a **scoped revision
+  to an already-built crate**, landing **before Phase 11** so the hardening gate has a concrete mechanism to
+  verify rather than a promise.
+- **Deployment half — Odin's operations.** HSM procurement and OS swap configuration. BROKKR can **require
+  and verify** these; it cannot implement them. This is the same plan/substrate split as **OQGF-A.6.1**
+  (BROKKR emits the triggers; the IR plan is organizational) and **OQGF-A-7** (BROKKR provides the export
+  capability; the 72-hour response window is operational).
+
+This target matches **RISK-2026-0001** (single-source entropy, OQGF-R-4), whose target is already
+**Pre-production** for the identical reason: the primitive is correct, and the guarantee depends on the
+deployment substrate, which no code phase can supply alone.
+
+**No hard build-stop deadline.** Unlike **RISK-2026-0004** — whose deferred OQGF-M-11 conjuncts carry the
+Deferred-Conjunct Deadline that *stops the build* at Phase 11 — this risk carries **no** build-halting
+deadline. Its visibility rests on Phase 11's declared **hardening gate** (CLAUDE.md §5.1) and the
+pre-production review; **naming the target is what keeps it in view**, which is the point of recording the
+decision here rather than leaving it TBD.
 
 ---
 
