@@ -1,0 +1,17 @@
+[package]
+name = "brokkr-audit"
+description = "SAGA — the Audit Spine (Organ 5, OQGF-A). A dual-family-signed, append-only, hash-linked record of every decision; chain self-verification with an OQGF-A.6.1 break trigger; re-signing that accumulates (OQGF-A-6); crypto-shred erasure with a tombstone (OQGF-P-11.5/11.7); a read-only signed export and subject rights (OQGF-A-7/P-11.6); the Risk and Risk-Acceptance registers. The chain links over SIGNED CONTENT only (ARCH Rev 1.10). Pure logic, no unsafe. Phase 7."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# SAGA records the committed payload types (brokkr-core) and signs/hashes with the
+# dual-family backend (brokkr-crypto). I-5: it SHALL NOT depend on brokkr-gate,
+# brokkr-genome, brokkr-barrier, brokkr-reasoner, brokkr-tools, or brokkr-cli — SAGA
+# offers a recording surface; it does not reach into other crates to collect events.
+# I-6: no model calls. No external dependency (errors hand-rolled, as brokkr-core is).
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }
