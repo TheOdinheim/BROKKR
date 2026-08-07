@@ -3,15 +3,15 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.10
-**Supersedes:** Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.11
+**Supersedes:** Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
 **Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 6 August 2026 (Rev 1.10)
+**Date:** 7 August 2026 (Rev 1.11)
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
+**Disposes:** Rev 1.11 places the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
 
 ---
 
@@ -840,31 +840,122 @@ Rev 1.2 adds **no new barrier mechanism.** HÚÐ already answers exactly the rig
 
 HEIMDALL is Organ 2's heuristic layer (OQGF-I-6) plus cross-hop reconciliation (OQGF-M-12). It is the *trained*, tolerable layer — and therefore the layer to which self-tolerance applies. Detectors are screened against REGIN's Self Set before deployment (OQGF-P-3); confirmed false positives are suppressed only by signed, scoped, expiring Tolerance Grants (OQGF-P-4). **HEIMDALL is heuristic and suppressible; SINDRI, HÚÐ's egress gate, BIFRÖST's mTLS requirement, and REGIN's promotion gate are neither.** Tolerance reduces false alarms; it never opens a hole in a deterministic gate (OQGF-P-2), and a request to suppress one is *refused*, not silently honored.
 
-**The host-harm bound (OQGF-P-1)** — the requirement most likely to be skipped, and the one a coding agent can least afford to skip. Host harm for BROKKR is the application of a defensive response — anergy, deny, quarantine, throttle — **to a legitimate coding action**. A BROKKR that denies half the legitimate work is not a cautious agent; it is a broken one. OQGF-P-1: *disruption of a legitimate operation is a governance failure of equal standing to a missed threat.*
+Rev 1.11 places what that requires. Rev 1.10 and earlier named a detector, a Self Set, and a host-harm rate without saying **what a detector observes, what screening runs against, or what the rate counts** — and the committed types are an id, a digest, and an `f64`. You cannot run an identifier against a fingerprint, and you cannot divide by an undefined denominator.
+
+#### What a detector observes
+
+A detector is heuristic: it looks at something BROKKR did or was asked to do, and says whether it looks wrong. **Rev 1.11 names the something.**
 
 ```rust
-pub struct HostHarmReport {
-    pub rate: f64,                 // legitimate actions harmed / legitimate actions
-    pub bound: f64,                // declared ceiling (OQGF-P-1)
-    pub autoimmunity: bool,        // sustained breach (OQGF-P-5a)
-    pub storm: Option<StormEvent>, // response beyond declared blast radius (OQGF-P-5b)
+/// What a heuristic detector may be shown. HEIMDALL is FED observations; it
+/// does not reach into other crates to collect them (I-5).
+pub enum Observation {
+    /// A proposed crossing and the Barrier's verdict on it (OQGF-I-12).
+    Crossing { flow: BoundaryFlow, verdict: BarrierVerdict },
+    /// An action presented to the gate and its outcome.
+    Authorization { action: Action, granted: bool, anergy: Option<AnergyReason> },
+    /// A coordinated signal received (AMD-004).
+    Signalled { signal: Signal },
+    /// One hop of a reconciliation: what the intent authorized, what was
+    /// executed. `executed` is None until the executor exists (Phase 11).
+    Hop { authorized: Action, executed: Option<Action> },
 }
 
-pub trait ToleranceController: Send + Sync {
-    /// SHALL refuse if the target is Deterministic (OQGF-P-2).
-    /// Returns Err. Never a silent no-op.
-    fn grant(&self, grant: ToleranceGrant, class: ResponseClass)
-        -> Result<GrantId, ToleranceError>;   // Err(NonSuppressibleGate)
+pub trait Detector: Send + Sync {
+    fn id(&self) -> &DetectorId;
+    /// Heuristic by construction. A detector may FIRE; it never authorizes.
+    fn observe(&self, o: &Observation) -> DetectionVerdict;
+}
 
-    /// Screen a detector against the Self Set before deployment (OQGF-P-3).
-    fn screen(&self, d: &DetectorSpec, s: &SelfSet)
-        -> Result<ScreenPass, ToleranceError>; // Err(FailsCentralTolerance)
-
-    fn host_harm(&self) -> HostHarmReport;
+pub enum DetectionVerdict {
+    Clear,
+    Fired { severity: Severity, detail: String },
 }
 ```
 
-**Autoimmunity** is a sustained rise in host harm above the bound — BROKKR increasingly blocking the work it exists to do. **A response storm** is a single graded response whose magnitude threatens availability regardless of whether its target was correct: quarantining the entire tree, denying every action in a session, revoking the whole tool genome. *Autoimmunity is hitting the wrong target. The storm is hitting the right target far too hard.* Both are raised through the graded-response path and recorded, on the principle that the defense harming the host is itself an incident, not a side effect to be tolerated.
+**Every variant is built from types already committed in `brokkr-core`**, so `brokkr-sentinel` observes a crossing without depending on `brokkr-barrier` and an authorization without depending on `brokkr-gate`. The orchestrator (Phase 11) feeds observations in. **HEIMDALL watches; it does not reach.**
+
+**A detector cannot grant anything.** `DetectionVerdict` has no variant that permits an action. The strongest thing a detector can do is fire, and firing raises posture through the graded-response path (OQGF-P-7) — it never opens a gate. This is the same shape as `RefinedDetector`'s fixed `Heuristic` class (I-9), applied to the interface rather than the record.
+
+#### Screening (OQGF-P-3) — what "against the Self Set" means
+
+> *"Detectors are screened against the Self Set before deployment."*
+
+Screening means: **run the candidate over known-good activity, and reject it if it fires.** A detector that flags normal work is a false-positive machine, and deploying it is how a defensive system starts strangling its host.
+
+That requires the corpus's **content**, not its digest. The committed `SelfSet` carries `corpus_digest` and not the observations themselves — correctly, since `brokkr-core` holds no data. The content arrives through a seam:
+
+```rust
+/// The known-good baseline, supplied to HEIMDALL. REGIN owns the declared
+/// SelfSet record; this provides the observations it is a digest OF.
+pub trait SelfSetCorpus: Send + Sync {
+    fn version(&self) -> SelfSetVersion;
+    fn observations(&self) -> &[Observation];
+    /// Digest over the canonical encoding of `observations`.
+    fn digest(&self) -> Digest;
+}
+```
+
+**Screening SHALL verify that `corpus.digest()` equals the declared `SelfSet.corpus_digest` before running anything**, and refuse with `FailsCentralTolerance` if it does not. This is what the digest field is *for*: without the check, a detector could be screened against a substituted corpus — one quietly chosen to contain nothing the detector fires on — and pass. **The digest is not decoration; it is the binding between the declared baseline and the data actually used.**
+
+A detector that fires on **any** observation in the verified corpus fails screening. Not a threshold, not a majority: the Self Set is *by declaration* legitimate activity, so a single hit is a demonstrated false positive.
+
+#### Where a Self Set comes from, and the bootstrap it implies
+
+The Self Set is **BROKKR's own legitimate activity, in the environment it runs in** — recorded through SAGA, curated, and DAP-signed. It is not a public corpus and not a generated one.
+
+**A borrowed baseline screens the wrong thing.** A detector that does not fire on some other project's activity has been shown nothing about whether it fires on *this* team's work, which is the only question screening asks. And a **synthetic** Self Set is worse than none: it declares "this is what normal looks like here" on the strength of a guess, and every detector screened against it inherits the guess. That is the poisoning shape AMD-003's four gates exist to prevent, entering through the baseline instead of through the candidate.
+
+**This creates a real ordering constraint, recorded in §13:** BROKKR cannot screen detectors until a Self Set exists, and a Self Set cannot exist until BROKKR has run legitimately long enough to have a baseline worth declaring. Screening is therefore inert in early deployment — a fact to plan around, not a defect to engineer away.
+
+#### Host harm (OQGF-P-1) — the numerator, the denominator, and the bias
+
+**The host-harm bound is the requirement most likely to be skipped, and the one a coding agent can least afford to skip.** Host harm for BROKKR is the application of a defensive response — anergy, deny, quarantine, throttle — **to a legitimate coding action**. A BROKKR that denies half the legitimate work is not a cautious agent; it is a broken one. OQGF-P-1: *disruption of a legitimate operation is a governance failure of equal standing to a missed threat.*
+
+Rev 1.10 gave the rate a formula and no way to compute it. Both terms are now defined:
+
+| Term | Definition |
+|---|---|
+| **Numerator** | Confirmed host-harm incidents in the window — each a defensive response a **DAP has confirmed** was applied to legitimate work. |
+| **Denominator** | Governed actions evaluated in the window: every action a deterministic gate or the barrier reached a verdict on. This is the population the defense *could* have harmed. |
+
+**Confirmation is a human act, and there is no way around that.** Whether a blocked action was legitimate is not derivable from the action; someone who knows the work has to say so. This mirrors AMD-003's `SeedingIncident` exactly — a DAP-confirmed **true** positive, the only thing that may seed learning — and Rev 1.11 places its missing counterpart, a DAP-confirmed **false** positive:
+
+```rust
+/// A defensive response a DAP has confirmed was applied to legitimate work.
+/// The mirror of AMD-003's SeedingIncident; the numerator of host harm.
+pub struct HostHarmIncident {
+    pub response: DefensiveResponse,   // Anergy | Deny | Quarantine | Throttle
+    pub action: Action,
+    pub confirmed_by: Dap,
+    pub at: Timestamp,
+}
+```
+
+**The rate is a lower bound, and §13 says so.** It counts only *confirmed* false positives. A false positive nobody reported does not appear, so the measured rate under-states real host harm, and always in the same direction — toward looking safer than it is. That bias is recorded rather than corrected, because correcting it would require confirming the legitimacy of every allowed action, which no one will do. **A rising confirmed rate is real; a low one is weak evidence.**
+
+**Autoimmunity (OQGF-P-5a)** is a sustained breach of the declared bound — BROKKR increasingly blocking the work it exists to do.
+
+**A response storm (OQGF-P-5b)** is a single graded response whose magnitude threatens availability regardless of whether its target was correct: quarantining the entire tree, denying every action in a session, revoking the whole tool genome. *Autoimmunity is hitting the wrong target. The storm is hitting the right target far too hard.*
+
+A storm needs a **declared blast radius** to be measured against — the DAP declares the largest response magnitude that is not, in itself, an incident, and a response exceeding it is a `StormEvent` whether or not its target was right. Undeclared, the bound cannot be exceeded and P-5b is unenforceable. Both autoimmunity and storms are raised through the graded-response path and recorded, on the principle that the defense harming the host is itself an incident, not a side effect to be tolerated.
+
+#### Cross-hop reconciliation (OQGF-M-12) — the mechanism now, the statistic later
+
+> *"The action actually executed at each hop SHALL be reconciled against the Root Intent."*
+
+Reconciliation compares what was **authorized** with what was **executed**. The comparison is buildable now and Phase 8 SHALL build it: an `Observation::Hop` whose `executed` differs from its `authorized` is a deviation, and a deviation raises posture (OQGF-P-7).
+
+**But nothing executes until Phase 11.** Every `Hop` observation before the executor exists carries `executed: None`, which is not a deviation — it is the absence of a comparison. The mechanism is testable at Phase 8 with supplied pairs; the *live* stream begins at Phase 11.
+
+**This corrects an error in Rev 1.4.** That revision recorded OQGF-M-6's `reconciliation_pass_rate` as *"unmeasured until HEIMDALL (Phase 8)"*, implying Phase 8 would supply it. It cannot: a per-supplier pass rate is a statistic **over reconciliation outcomes**, and there are no outcomes until actions are executed (Phase 11) against proposals from a reasoner (Phase 10). **OQGF-M-6 remains PARTIAL past Phase 8**, and §14 now says so. Phase 8 builds the mechanism that will one day produce the number; it does not produce the number.
+
+#### What Phase 8 does not build
+
+- **Concrete detectors.** The `Detector` trait, the screening machinery, and the host-harm accounting are the phase; the detectors themselves are content, and content that has not been screened against a real Self Set should not be shipped as though it had.
+- **A production Self Set.** The `SelfSetCorpus` seam is defined; a test double serves the tests. The real baseline comes from deployment (above, §13).
+- **KVASIR** (Phase 9), **BIFRÖST** (Phase 8.5), **the executor** (Phase 11).
+- **The reconciliation statistic** for OQGF-M-6 (above).
 
 ### 6.8 EIR — the Resolution Engine
 
@@ -1303,6 +1394,8 @@ Named, not claimed eliminated.
 - **The reasoner's competence.** BROKKR governs what the model may *do*, not how well it *reasons*. Quality of reasoning is a property of MÍMIR, improved by adopting better models — not something the spine can enforce.
 - **Attestation is not verified as attestation.** *(New in Rev 1.3.)* At Phase 4, Signal 1 proves key possession for a declared identity; it does not verify `Attestation.measurements` against expected platform state, and no attestation issuer exists. OQGF-M-1 is PARTIAL. Closing it requires an issuer, a committed attestation signed-content encoding, and a measurement-expectation source (§6.4).
 - **Two of OQGF-M-11's four conjuncts are not yet enforced.** *(New in Rev 1.3.)* Action-in-scope and action-respects-invariants are deferred pending the tool-to-capability vocabulary (REGIN, Phase 5) and an invariant-evaluator seam. Bounded by the **Deferred-Conjunct Deadline** (§6.4): both SHALL be enforced before the executor is wired at Phase 11.
+- **The host-harm rate is a lower bound, biased toward looking safe.** *(New in Rev 1.11.)* Its numerator is *confirmed* host-harm incidents — a DAP saying a blocked action was legitimate. A false positive nobody reports does not appear, so the measured rate under-states real host harm, and always in the same direction. Correcting it would require confirming the legitimacy of every *allowed* action, which no one will do. **A rising confirmed rate is real evidence; a low one is weak evidence.** Mitigation is procedural — making confirmation cheap and routine — not architectural.
+- **Screening is inert until a Self Set exists, and a Self Set requires having run.** *(New in Rev 1.11.)* Central-tolerance screening (OQGF-P-3) tests a detector against BROKKR's own legitimate activity in its own environment. That baseline comes from SAGA records of real work, curated and DAP-signed — so it cannot exist before deployment. A borrowed public corpus screens the wrong population, and a synthetic one declares a guess about normal and passes it to every detector screened against it. **Early deployment therefore runs with screening effectively unavailable**, which is an ordering constraint to plan around rather than a defect to engineer away.
 - **Stripping an attestation is not chain-detectable.** *(New in Rev 1.10.)* Because the chain links over signed content only (§6.9), removing a `GenerationSignature` or a timestamp token from a record leaves the chain verifying. This is **inherent to any scheme where attestations accumulate after sealing**: making the next record commit to a record's signature set would reintroduce exactly the contradiction Rev 1.10 corrects, since that set grows at every re-signing. Detection is therefore by policy rather than by the chain — a record SHALL carry at least one `GenerationSignature`, generations SHALL appear in order, and a record whose signature set has fewer entries than the store's declared re-signing history is a finding. What the chain proves is that **content** was not altered; what it cannot prove is that **every attestation ever attached is still attached**. Closing that requires a signed store-level manifest of attestation counts, which is later work.
 - **Audit records carry no trusted timestamp.** *(New in Rev 1.9.)* OQGF-A-3 requires records *"timestamped via an RFC 3161-compliant authority that itself supports PQC signing."* BROKKR's spine performs no network I/O, so an authority is an injected dependency the audit crate cannot provide. §6.9 defines the seam and records the absence explicitly (`Timestamping::Unavailable`) rather than omitting it; **OQGF-A-3 is PARTIAL** — the dual-family signing half is met, the timestamp half is not. What this costs is precise: the ordering of records is BROKKR's own claim rather than a third party's attestation, so the chain proves internal consistency and not independent time. Closing it requires wiring a PQC-signing TSA. It is **not** reclassified to High-Assurance: A-3 carries no level qualifier in the corpus and binds at Enhanced.
 - **The promotion gate's findings have no identity either.** *(New in Rev 1.8.)* `DeterministicGateId::Genome` has existed since Phase 1, implying acceptances for OQGF-G-4 promotion-gate findings are anticipated — but Phase 5 built no acceptance path, and `brokkr-genome`'s findings carry no identity an acceptance could be scoped to. That is the same defect Rev 1.8 corrects for the Barrier, at a different gate. It is **not** corrected here: the Barrier is what blocks Phase 6, and reshaping the promotion gate's findings belongs with the phase that revisits REGIN. Named so it is a scheduled correction rather than a later discovery.
@@ -1334,13 +1427,16 @@ Named, not claimed eliminated.
 | OQGF-I-6 (graded response) | `brokkr-sentinel` posture raise via coordinated signal |
 | OQGF-I-7 (recorded resolution) | `brokkr-sentinel` (EIR) — `ResolutionDecision`, never a timeout |
 | **OQGF-I-8 … I-11, I-13, I-14 (AMD-007)** | **`brokkr-barrier` (HÚÐ), Phase 6 — `BoundaryFlow` as a directional sum type; the `BoundaryCustodyRecord` and its eight-condition egress gate; ingress quarantine gated on `ContextClass`; the uncontrolled-channel register (§6.5, Rev 1.6). I-13's recording is Organ 5 (Phase 7)** |
+| **OQGF-I-6, P-3, P-4 (heuristic layer, screening, tolerance)** | **`brokkr-sentinel` (HEIMDALL), Phase 8 — the `Detector`/`Observation` surface, `SelfSetCorpus` seam with the mandatory corpus-digest binding, and the sealed `ToleranceController::grant` that refuses a Deterministic target (§6.7, Rev 1.11)** |
+| **OQGF-P-1, P-5 (host harm, autoimmunity, storms)** | **`brokkr-sentinel` — numerator is DAP-confirmed `HostHarmIncident`s, denominator is governed actions evaluated; storms measured against a declared blast radius. The rate is a lower bound (§13) (§6.7, Rev 1.11)** |
+| **OQGF-M-12 (cross-hop reconciliation)** | **PARTIAL — `brokkr-sentinel` builds the authorized-vs-executed comparison at Phase 8; `executed` is `None` until the executor exists (Phase 11), so the live stream and any statistic over it begin there (§6.7, Rev 1.11)** |
 | **OQGF-P-9.1 … P-9.3 (AMD-006)** | **`brokkr-core::barrier::{BarrierFinding, BarrierCondition}` carry the exact component identity and precise advisory an acceptance is scoped to; `FindingId` and `BarrierFinding::finding_id()` make that identity deterministic and pre-issuable; `RiskAcceptance::finding: FindingId` and `DeterministicGateId::Barrier` complete the link (§6.5, Rev 1.8). Enforcement is `brokkr-barrier` (Phase 6). P-9.4/P-9.5 PARTIAL until tolerance grants exist (Phase 8)** |
 | **OQGF-P-11.1, P-11.3, P-11.4 (AMD-009)** | **`brokkr-core::barrier::PersonalDataTag` — orthogonal to `Classification`; carried on both the flow and the BCR; egress condition 9 and the Privileged-Context ingress rule (§6.5, Rev 1.7). PARTIAL for P-11.2: the declared Purpose is gated, minimization is not (§13). P-11.5 crypto-shredding is `brokkr-crypto` (Phase 2); P-11.6/P-11.7 are SAGA (Phase 7)** |
 | **OQGF-I-12, I-15 (AMD-007)** | **Heuristic — the data-content sentinel and bypass detection belong to the sentinel network (HEIMDALL, Phase 8), not to the deterministic barrier (§6.5)** |
 | **OQGF-M-1 (attestation)** | **PARTIAL — `Attestation` per hop. SINDRI verifies key possession for a declared root of trust (§6.4.1) and binds identity to the chain's proven hop; `measurements` are not verified and no issuer exists (§6.4, §13)** |
 | OQGF-M-4 (short-lived creds) | Root Intent freshness and expiry (OQGF-M-14) |
 | **OQGF-M-5 (mutual auth)** | **`ModelEndpoint::client_cert` required at registration. One-sided TLS is unrepresentable (I-11)** |
-| **OQGF-M-6 (vendor trust score)** | **PARTIAL — `brokkr-genome::VendorTrustScore`; all five M-6 factors placed incl. `reconciliation_pass_rate` (Rev 1.4), but that factor is unmeasured until HEIMDALL (Phase 8). Stale after 90 days; gate-blocking. Distinct from R-2** |
+| **OQGF-M-6 (vendor trust score)** | **PARTIAL — `brokkr-genome::VendorTrustScore`; all five M-6 factors placed incl. `reconciliation_pass_rate` (Rev 1.4). That factor is a statistic over reconciliation OUTCOMES, so it is unmeasurable until actions are executed (Phase 11) against proposals (Phase 10) — **not** at Phase 8, correcting Rev 1.4 (§6.7, Rev 1.11). Stale after 90 days; gate-blocking. Distinct from R-2** |
 | OQGF-M-8 … M-14 (AMD-001) | `brokkr-intent` (SKULD). **Chain verified in SINDRI via `Skuld::verify_chain_public` against declared public roots of trust (§6.4.1)** |
 | **OQGF-M-11 (costimulation)** | **PARTIAL — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. Signals 1-2 enforced at Phase 4. Conjunct 3 (action-in-scope) becomes computable via `ToolEntry::required_capabilities` and conjunct 4 via `PolicyRegister` (§6.2, Rev 1.4); both SHALL be enforced before Phase 11 (Deferred-Conjunct Deadline, §6.4)** |
 | **OQGF-M-10 (invariant enforcement)** | **PARTIAL — accumulation and non-removal enforced in SKULD; action-evaluation lands via `PolicyRegister` for DECLARATIVE invariants (§6.2, Rev 1.4); detail-level invariants remain unevaluated (§13)** |
@@ -1369,11 +1465,27 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amends the A-6 row for the corrected linkage digest.
+**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrects the M-6 row's timing and adds itemized rows for the sentinel requirements.
 
 ---
 
 ## 15. Change log
+
+**Rev 1.11 — 7 August 2026. Places the Phase-8 sentinel surface: what a detector observes, what screening runs against, and what the host-harm rate counts. Corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8.**
+
+**Rev 1.10 named a detector, a Self Set, and a host-harm rate without saying what any of them acts on.** The committed types are `DetectorSpec { id }`, `SelfSet { version, corpus_digest, owner }`, and `rate: f64`. **You cannot run an identifier against a fingerprint, and you cannot divide by an undefined denominator.** Screening was unbuildable, host harm was uncomputable, and neither was recorded as a gap — the section read as specification because it named the right requirements in the right order.
+
+- **§6.7 — `Observation` names what a detector is shown**: a crossing and its verdict, an authorization and its outcome, a received signal, or a reconciliation hop. Every variant is built from types already in `brokkr-core`, so `brokkr-sentinel` observes a crossing without depending on `brokkr-barrier` and an authorization without depending on `brokkr-gate` (I-5). **HEIMDALL is fed observations; it does not reach into other crates to collect them.**
+- **A `DetectionVerdict` has no variant that permits anything.** The strongest act available to a detector is to fire, which raises posture through the graded-response path. This is `RefinedDetector`'s fixed-`Heuristic` guarantee (I-9) applied to the interface rather than the record.
+- **Screening is defined, and the corpus digest turns out to be load-bearing.** Screening runs the candidate over known-good activity and rejects it if it fires; that needs the corpus's **content**, which arrives through a `SelfSetCorpus` seam. **Screening SHALL verify the corpus digest against the declared `SelfSet` before running anything.** Without that check a detector could be screened against a substituted corpus — one quietly chosen to contain nothing it fires on — and pass. The digest is the binding between the declared baseline and the data actually used.
+- **A single hit fails screening.** Not a threshold: the Self Set is *by declaration* legitimate activity, so one firing is a demonstrated false positive.
+- **Where a Self Set comes from is stated, because getting it wrong is a poisoning vector.** It is BROKKR's own legitimate activity in its own environment, from SAGA records, curated and DAP-signed. A borrowed public corpus screens the wrong population — a detector that stays quiet on someone else's repo has been shown nothing about this team's work. A **synthetic** baseline is worse than none: it declares what normal looks like on the strength of a guess, and every detector screened against it inherits the guess. **That is AMD-003's poisoning shape entering through the baseline instead of the candidate.**
+- **Host harm's two terms are defined.** Numerator: DAP-confirmed host-harm incidents. Denominator: governed actions evaluated in the window — the population the defense could have harmed. Rev 1.11 places `HostHarmIncident`, **the missing mirror of AMD-003's `SeedingIncident`**: that type is a DAP-confirmed *true* positive and the only thing that may seed learning; this one is a DAP-confirmed *false* positive and the only thing that counts as harm. Confirmation is a human act in both directions, and there is no way around that — whether a blocked action was legitimate is not derivable from the action.
+- **A storm needs a declared blast radius.** OQGF-P-5b makes a response an incident when its magnitude threatens availability *regardless of whether its target was correct*. Undeclared, the bound cannot be exceeded and P-5b is unenforceable.
+- **§13 records two residuals the definitions create.** The host-harm rate is a **lower bound biased toward looking safe** — unreported false positives never appear, and correcting that would require confirming the legitimacy of every allowed action. And **screening is inert until a Self Set exists**, which requires having already run legitimately: an ordering constraint to plan around, not a defect to engineer away.
+- **§14 corrects OQGF-M-6's timing.** Rev 1.4 recorded `reconciliation_pass_rate` as *"unmeasured until HEIMDALL (Phase 8)"*. It is a statistic over reconciliation **outcomes**, and there are none until actions are executed (Phase 11) against proposals from a reasoner (Phase 10). **M-6 remains PARTIAL past Phase 8.** Phase 8 builds the comparison that will one day produce the number; it does not produce the number. OQGF-M-12 is itemized as PARTIAL for the same reason: the mechanism now, the live stream at Phase 11.
+
+**On the failure mode, which was not the usual one.** The four prior defects were assertions the committed types could not support. This one is different: §6.7 was **operationally empty** — every requirement present, every name correct, and nothing in it that could be executed. It survived ten revisions because a reader checking whether P-1, P-3, P-4, and P-5 were *addressed* would find that they were. **Addressed is not the same as specified**, and the difference only shows when someone tries to build it.
 
 **Rev 1.10 — 6 August 2026. Disposes GAP-2026-08-06-001. Corrects a contradiction Rev 1.9 introduced: the chain-linkage digest was defined two ways that cannot both hold.**
 
@@ -1517,4 +1629,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.10.
+— End of BROKKR technical architecture, Rev 1.11.
