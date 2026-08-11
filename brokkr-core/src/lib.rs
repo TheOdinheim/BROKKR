@@ -146,6 +146,6 @@ pub use risk::{
 };
 pub use signal::{PostureEffect, Severity, Signal, SignalClass, SignalScope};
 pub use tolerance::{
-    HostHarmReport, ResponseClass, ScreenPass, SelfSet, StormEvent, ToleranceController,
-    ToleranceError, ToleranceGrant,
+    DefensiveResponse, HostHarmIncident, HostHarmReport, ResponseClass, ScreenPass, SelfSet,
+    StormEvent, ToleranceController, ToleranceError, ToleranceGrant,
 };

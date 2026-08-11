@@ -5,6 +5,7 @@
 //! method, in core, so no implementor can skip it (OQGF-P-2).
 
 use crate::crypto::{Digest, DualSignature};
+use crate::gate::Action;
 use crate::ids::{Dap, DetectorId, GrantId, SelfSetVersion, Timestamp};
 use alloc::string::String;
 
@@ -64,6 +65,57 @@ pub struct HostHarmReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StormEvent {
     pub detail: String,
+}
+
+/// The **kind** of defensive response that can constitute host harm when applied to
+/// legitimate work (OQGF-P-1) — the four §6.7 names. This records **what was done**, not
+/// a verdict: it is the after-the-fact classification of a response for host-harm
+/// accounting. The deterministic verdict types stay exactly where they are — a
+/// costimulation refusal is still an [`crate::gate::AnergyReason`], a barrier decision
+/// still a [`crate::barrier::BarrierVerdict`]. `DefensiveResponse` does not replace or
+/// convert either; it names the category a confirmed [`HostHarmIncident`] falls into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefensiveResponse {
+    /// Architectural anergy — a costimulation denial (AMD-001).
+    Anergy,
+    /// A barrier egress denial (OQGF-I-10).
+    Deny,
+    /// A barrier ingress quarantine (OQGF-I-11).
+    Quarantine,
+    /// A rate-limiting throttle (OQGF-I-6 graded response).
+    Throttle,
+}
+
+/// A defensive response a DAP has confirmed was applied to **legitimate** work — the
+/// numerator of the host-harm rate (OQGF-P-1).
+///
+/// This is the deliberate mirror of [`crate::adapt::SeedingIncident`], and both exist for
+/// the same reason: whether a blocked action was legitimate is **not derivable from the
+/// action** — someone who knows the work has to say so. `SeedingIncident` is a
+/// DAP-confirmed **true** positive, the only thing that may seed learning (OQGF-P-6.1);
+/// `HostHarmIncident` is a DAP-confirmed **false** positive, the only thing that counts
+/// toward the host-harm rate (OQGF-P-1). Confirmation is a human act in **both**
+/// directions.
+///
+/// `confirmed_by` is **required, not `Option`**: an unconfirmed report is not a host-harm
+/// incident, and this type cannot represent one.
+///
+/// The **rate** — this numerator over the count of governed actions a gate or the barrier
+/// evaluated in the window — is computed in `brokkr-sentinel` (HEIMDALL, Phase 8), **not
+/// here**. §13 records that rate as a **lower bound**: it counts only *confirmed* false
+/// positives, so an unreported one never appears and the measured rate under-states real
+/// host harm, always in the same direction — toward looking safer than it is. A rising
+/// confirmed rate is real; a low one is weak evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostHarmIncident {
+    /// What was done to the legitimate action.
+    pub response: DefensiveResponse,
+    /// The legitimate action that was harmed. `Action` is `Clone`, so the incident owns
+    /// its own copy.
+    pub action: Action,
+    /// The accountable natural person who confirmed the action was legitimate (OQGF-A-5).
+    pub confirmed_by: Dap,
+    pub at: Timestamp,
 }
 
 /// The declared known-good baseline ("self"), screened against before deployment
