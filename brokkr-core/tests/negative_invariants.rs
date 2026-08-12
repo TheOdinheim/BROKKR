@@ -371,6 +371,8 @@ fn test_i8_escalation_needs_resolution_path_and_dap_confirmed_resolution() {
         },
         dap(),
         Timestamp(5),
+        brokkr_core::ids::Nonce(1),
+        Timestamp(1000),
         dual_sig(),
     );
     assert_eq!(decision.dap, dap());

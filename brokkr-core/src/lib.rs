@@ -139,6 +139,7 @@ pub use personal_data::{Purpose, RetentionPeriod};
 pub use reasoner::{ClearedContext, Context, ContextClearance, Proposal, Reasoner, ReasonerError};
 pub use resolution::{
     EscalationType, ResolutionDecision, ResolutionEngine, ResolutionVerdict, ResolveError,
+    resolution_signed_content,
 };
 pub use risk::{
     DeterministicGateId, Disposition, Impact, Likelihood, RiskAcceptance, RiskEntry, RiskId,

@@ -38,8 +38,21 @@ pub struct ToleranceGrant {
 
 error_enum! {
     /// Why a tolerance operation was refused.
+    ///
+    /// **The controller's checks are ordered, and it returns the reason of the FIRST that
+    /// failed** (the ordering lives in the sentinel's `grant_heuristic`, not in this enum's
+    /// variant order). A forged grant reports [`SignatureInvalid`](Self::SignatureInvalid) —
+    /// one true reason — and **not** also a scope or expiry verdict that was never evaluated:
+    /// reporting both would state a finding that was not reached, and would tell a forger
+    /// which *other* checks their grant would have failed, which is free information about the
+    /// shape of a valid one (Rev 1.12, §6.7).
     pub enum ToleranceError {
         NonSuppressibleGate => "cannot attach a tolerance grant to a Deterministic gate (OQGF-P-2)",
+        /// The grant's dual-family signature did not verify under the declared DAP key
+        /// (OQGF-P-4). Before Rev 1.12 there was no such variant, so the sentinel reported a
+        /// forged grant as `OutOfScope` — fail-closed, but untrue in the record, in exactly
+        /// the place someone investigating an attack would be reading.
+        SignatureInvalid => "the tolerance grant's signature did not verify (OQGF-P-4)",
         FailsCentralTolerance => "detector fails central-tolerance screening against the Self Set (OQGF-P-3)",
         Expired => "the tolerance grant has expired (OQGF-P-4)",
         OutOfScope => "the tolerance grant is out of scope (OQGF-P-4)",
