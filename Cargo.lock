@@ -53,3 +53,11 @@ dependencies = [
  "brokkr-core",
  "brokkr-crypto",
 ]
+
+[[package]]
+name = "brokkr-sentinel"
+version = "0.1.0"
+dependencies = [
+ "brokkr-core",
+ "brokkr-crypto",
+]

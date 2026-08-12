@@ -12,6 +12,7 @@ members = [
     "brokkr-genome",
     "brokkr-barrier",
     "brokkr-audit",
+    "brokkr-sentinel",
 ]
 
 [workspace.package]

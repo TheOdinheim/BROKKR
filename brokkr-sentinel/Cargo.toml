@@ -1,0 +1,16 @@
+[package]
+name = "brokkr-sentinel"
+description = "HEIMDALL + EIR — Organ 2's heuristic layer and the Resolution Engine. Detector/SelfSetCorpus seams, OQGF-P-3 screening (recomputed corpus-digest binding), OQGF-P-2/P-4 tolerance (core's sealed refusal of a Deterministic gate), OQGF-P-1/P-5 host-harm accounting (rate is a lower bound; storm needs a declared radius), OQGF-M-12 reconciliation (raise-only Signals), and OQGF-P-8 resolution with the fail-safe asymmetry (only a DAP-signed decision lowers posture). Fed observations; reaches nothing (I-5). Pure logic, no unsafe. Phase 8."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# HEIMDALL/EIR reason over committed observation/verdict/resolution types (brokkr-core) and
+# verify/sign dual-family signatures (brokkr-crypto). I-5: SHALL NOT depend on brokkr-gate,
+# brokkr-genome, brokkr-barrier, brokkr-audit, brokkr-reasoner, brokkr-tools, or brokkr-cli —
+# HEIMDALL is FED observations; it does not reach. I-6: no model calls.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }
