@@ -225,10 +225,34 @@ pub struct ChronicEscalation {
 
 error_enum! {
     /// Why a resolution was refused.
+    ///
+    /// **A refusal names the reason it actually is (Rev 1.13).** [`Expired`](Self::Expired) and
+    /// [`ReplayedNonce`](Self::ReplayedNonce) are **two variants, not one**, because they are
+    /// two different events. An expiry is almost always operational latency — a slow DAP, a
+    /// queued approval, clock skew. **A replay is an attack**, and its whole character is that
+    /// the decision is *authentic*: correctly signed, by the right DAP, over criteria that
+    /// really were met — **once**. Collapsing them into a single `Stale` would file "someone
+    /// took too long" and "someone is replaying a stand-down against you" under one word, and
+    /// an operator would learn which only by reading the code.
+    ///
+    /// **Neither reuses [`NeedsDapConfirmation`](Self::NeedsDapConfirmation).** A replayed
+    /// decision *is* DAP-confirmed — the signature verifies, the DAP is named, the record is
+    /// authentic — so reporting missing confirmation during a replay points the investigation
+    /// at the one thing that is *not* wrong. An error variant is a claim about what happened,
+    /// and a false claim in a refusal is a false claim in the audit record. This is the same
+    /// correction Rev 1.12 made for [`crate::tolerance::ToleranceError::SignatureInvalid`],
+    /// applied to the other half of the same revision (§6.8).
     pub enum ResolveError {
         CriteriaNotMet => "resolution criteria not met (OQGF-P-8.1)",
         HysteresisNotSatisfied => "dwell/hold hysteresis not satisfied (OQGF-P-8.3)",
         NeedsDapConfirmation => "de-escalation above baseline requires DAP confirmation (OQGF-P-8.5)",
+        /// `now > decision.expiry`. The decision was validly made and validly signed; it
+        /// simply arrived too late — operational latency, not an attack (OQGF-P-8.5, Rev 1.13).
+        Expired => "the resolution decision has expired (OQGF-P-8.5)",
+        /// The `nonce` was already accepted for this escalation. The decision is **authentic**,
+        /// and that is the point: correctly signed, by the right DAP, over criteria that really
+        /// were met once — now being presented again (OQGF-P-8.5, Rev 1.13).
+        ReplayedNonce => "the resolution decision's nonce was already accepted (OQGF-P-8.5)",
     }
 }
 
