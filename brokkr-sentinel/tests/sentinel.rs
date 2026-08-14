@@ -5,19 +5,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use brokkr_sentinel::canonical::{
-    corpus_signed_content, grant_signed_content, resolution_signed_content,
-};
+use brokkr_sentinel::canonical::{corpus_signed_content, grant_signed_content};
 use brokkr_sentinel::{
     DetectionVerdict, Detector, Eir, Heimdall, Observation, SelfSetCorpus, StormAssessment,
 };
 
 use brokkr_core::crypto::{Digest, Hasher};
 use brokkr_core::gate::{Action, AnergyReason};
-use brokkr_core::ids::{Dap, DetectorId, EscalationId, SelfSetVersion, Timestamp, ToolId};
+use brokkr_core::ids::{Dap, DetectorId, EscalationId, Nonce, SelfSetVersion, Timestamp, ToolId};
 use brokkr_core::resolution::{
     BaselinePosture, ClearCondition, ClearEvidence, EscalationType, ResolutionDecision,
-    ResolutionEngine, ResolutionVerdict, ResolveError,
+    ResolutionEngine, ResolutionVerdict, ResolveError, resolution_signed_content,
 };
 use brokkr_core::signal::PostureEffect;
 use brokkr_core::tolerance::{
@@ -193,7 +191,13 @@ fn escalation(id: &str, dwell: u64, hold: u64, max: u64) -> EscalationType {
     )
 }
 
-fn signed_decision(id: &str, at: u64, signer: &DualKeyPair) -> ResolutionDecision {
+fn signed_decision(
+    id: &str,
+    at: u64,
+    nonce: u64,
+    expiry: u64,
+    signer: &DualKeyPair,
+) -> ResolutionDecision {
     let mut d = ResolutionDecision::new(
         EscalationId::new(id),
         ClearEvidence {
@@ -201,8 +205,11 @@ fn signed_decision(id: &str, at: u64, signer: &DualKeyPair) -> ResolutionDecisio
         },
         dap(),
         Timestamp(at),
+        Nonce(nonce),
+        Timestamp(expiry),
         dummy_dual(),
     );
+    // Sign over CORE's canonical encoding — the same bytes EIR verifies over (Rev 1.12).
     d.signature = signer.sign_dual(&resolution_signed_content(&d)).unwrap();
     d
 }
@@ -240,16 +247,18 @@ fn test_oqgf_p_4_expired_grant_refused() {
 }
 
 #[test]
-fn test_oqgf_p_4_forged_grant_refused() {
+fn test_oqgf_p_4_forged_grant_reports_signature_invalid() {
     let dap_kp = DualKeyPair::generate().unwrap();
     let attacker = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2, Timestamp(0));
-    // Signed by the attacker, not the DAP → not authentic → OutOfScope (no committed
-    // signature-failure variant; fail-closed).
+    // Signed by the attacker, not the DAP → not authentic → SignatureInvalid (Rev 1.12).
+    // (Corrected expectation: Phase 8 reported this as OutOfScope for lack of a variant; the
+    // variant now exists, so a forged grant is reported AS forged — the true, first-failing
+    // reason — not as a scope verdict that was never evaluated.)
     let grant = signed_grant("det-1", "signal:x", 1000, &attacker);
     assert_eq!(
         h.grant(grant, ResponseClass::Heuristic),
-        Err(ToleranceError::OutOfScope)
+        Err(ToleranceError::SignatureInvalid)
     );
 }
 
@@ -447,7 +456,7 @@ fn test_oqgf_p_8_5_cannot_lower_above_baseline_without_dap() {
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
     // A decision signed by the ATTACKER (not the DAP) is not DAP-confirmed.
-    let forged = signed_decision("e1", 1000, &attacker);
+    let forged = signed_decision("e1", 1000, 1, 1_000_000, &attacker);
     assert_eq!(eir.resolve(forged), Err(ResolveError::NeedsDapConfirmation));
 }
 
@@ -462,8 +471,87 @@ fn test_resolve_succeeds_with_dap_and_eligibility() {
         eir.may_resolve(&EscalationId::new("e1")),
         ResolutionVerdict::Eligible { needs_dap: true }
     ));
-    let decision = signed_decision("e1", 1000, &dap_kp);
+    let decision = signed_decision("e1", 1000, 1, 1_000_000, &dap_kp);
     assert!(eir.resolve(decision).is_ok());
+}
+
+#[test]
+fn test_oqgf_p_8_5_expired_decision_is_refused() {
+    // Valid in every respect except freshness: correctly signed, escalation eligible, but the
+    // decision's expiry is in the past relative to `now` → Expired (latency, not an attack).
+    let dap_kp = DualKeyPair::generate().unwrap();
+    let eir = Eir::new(public_of(&dap_kp), Timestamp(2000)); // now = 2000
+    eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
+    eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
+
+    let decision = signed_decision("e1", 500, 7, 1000, &dap_kp); // expiry 1000 < now 2000
+    assert_eq!(eir.resolve(decision), Err(ResolveError::Expired));
+}
+
+#[test]
+fn test_oqgf_p_8_5_replayed_nonce_is_refused() {
+    // THE REPLAY TEST — why the fields exist, and why the adoption revision stopped rather than
+    // shipping without it. A decision resolves once; presented again with the same nonce it is
+    // refused as ReplayedNonce — even after the escalation stood down and was RAISED AGAIN
+    // (the accepted nonce persists across resolution and re-raising).
+    let dap_kp = DualKeyPair::generate().unwrap();
+    let eir = Eir::new(public_of(&dap_kp), Timestamp(1000));
+    eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
+    eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
+
+    let decision = signed_decision("e1", 1000, 42, 1_000_000, &dap_kp);
+    assert!(
+        eir.resolve(decision.clone()).is_ok(),
+        "first presentation resolves"
+    );
+
+    // Raise the same escalation id again and satisfy its clear condition — a fresh escalation,
+    // but the nonce accepted for `e1` is not reusable.
+    eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
+    eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
+    assert_eq!(eir.resolve(decision), Err(ResolveError::ReplayedNonce));
+}
+
+#[test]
+fn test_sentinel_and_core_encodings_agree() {
+    // Guards against the sentinel's verification path and core's encoding ever diverging again
+    // (Phase 8 had a crate-local copy that disagreed). A decision signed over CORE's encoding
+    // resolves — so EIR verifies over those exact bytes; a decision signed over DIFFERENT bytes
+    // does not — so EIR is not verifying over some other encoding.
+    let dap_kp = DualKeyPair::generate().unwrap();
+    let eir = Eir::new(public_of(&dap_kp), Timestamp(1000));
+    eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
+    eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
+
+    // Signed over core's canonical bytes → verifies → resolves.
+    let good = signed_decision("e1", 1000, 7, 1_000_000, &dap_kp);
+    // The bytes the sentinel signs (via `signed_decision`) are exactly core's, so re-encoding
+    // the same decision reproduces them — one definition, both parties.
+    assert_eq!(
+        resolution_signed_content(&good),
+        resolution_signed_content(&good.clone())
+    );
+    assert!(
+        eir.resolve(good).is_ok(),
+        "EIR verifies over core's encoding"
+    );
+
+    // Signed over unrelated bytes → does NOT verify → not DAP-confirmed.
+    let mut bad = ResolutionDecision::new(
+        EscalationId::new("e1"),
+        ClearEvidence {
+            detail: "cleared".to_string(),
+        },
+        dap(),
+        Timestamp(1000),
+        Nonce(8),
+        Timestamp(1_000_000),
+        dummy_dual(),
+    );
+    bad.signature = dap_kp.sign_dual(b"not the resolution encoding").unwrap();
+    eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
+    eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
+    assert_eq!(eir.resolve(bad), Err(ResolveError::NeedsDapConfirmation));
 }
 
 #[test]

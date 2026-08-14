@@ -5,14 +5,20 @@
 //! field length-prefixed with a fixed 8-byte big-endian count; a domain tag; exhaustive enum
 //! tags matched with **no catch-all** (a new variant breaks the build rather than colliding).
 //!
-//! Four encodings, four domain tags, all `brokkr-sentinel:*` — distinct from every
+//! Three encodings, three domain tags, all `brokkr-sentinel:*` — distinct from every
 //! `brokkr-genome:*`, `brokkr-barrier:*`, and `brokkr-audit:*` tag (four-crate domain
 //! separation, tested in `tests/sentinel.rs`):
 //!
 //! - `brokkr-sentinel:corpus:v1` — the Self Set corpus digest (OQGF-P-3 screening).
 //! - `brokkr-sentinel:tolerance-grant:v1` — a `ToleranceGrant`'s signed content (OQGF-P-4).
-//! - `brokkr-sentinel:resolution:v1` — a `ResolutionDecision`'s signed content (OQGF-P-8).
 //! - `brokkr-sentinel:signal:v1` — a `Signal`'s signed content (posture-raise emission).
+//!
+//! **The resolution-decision encoding is NOT here.** A `ResolutionDecision` is signed by a DAP
+//! tool and verified by EIR — two parties — so its bytes are defined **once, in `brokkr-core`**
+//! ([`brokkr_core::resolution::resolution_signed_content`], tag `brokkr-core:resolution:v1`,
+//! Rev 1.12), and EIR calls that. A crate-local copy lived here through Phase 8 and disagreed
+//! with core's (a different tag, and missing `nonce`/`expiry`); it was deleted in the Rev 1.12
+//! adoption so the issuer and the verifier compute identical bytes from one definition.
 
 use brokkr_core::barrier::{
     BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
@@ -23,7 +29,6 @@ use brokkr_core::crypto::{DualSignature, Signature, SignatureAlg};
 use brokkr_core::gate::{Action, AnergyReason};
 use brokkr_core::ids::{Dap, OrganId};
 use brokkr_core::personal_data::{Purpose, RetentionPeriod};
-use brokkr_core::resolution::ResolutionDecision;
 use brokkr_core::signal::{PostureEffect, Severity, Signal, SignalClass};
 use brokkr_core::tolerance::ToleranceGrant;
 
@@ -31,7 +36,6 @@ use crate::observation::Observation;
 
 const DOMAIN_CORPUS: &[u8] = b"brokkr-sentinel:corpus:v1";
 const DOMAIN_GRANT: &[u8] = b"brokkr-sentinel:tolerance-grant:v1";
-const DOMAIN_RESOLUTION: &[u8] = b"brokkr-sentinel:resolution:v1";
 const DOMAIN_SIGNAL: &[u8] = b"brokkr-sentinel:signal:v1";
 
 /// A canonical byte accumulator. All variable-length data is length-prefixed.
@@ -429,20 +433,6 @@ pub fn grant_signed_content(g: &ToleranceGrant) -> Vec<u8> {
     write_dap(&mut c, &g.dap);
     c.u64(g.issued.0);
     c.u64(g.expiry.0);
-    c.finish()
-}
-
-/// The bytes a [`ResolutionDecision::signature`] covers — every field except the signature.
-/// EIR verifies this under the declared DAP key; a decision whose signature does not verify
-/// is not DAP-confirmed (OQGF-P-8.5). §6.8 specifies no encoding, so this defines one, in the
-/// Task-2 discipline with a distinct domain tag.
-pub fn resolution_signed_content(d: &ResolutionDecision) -> Vec<u8> {
-    let mut c = Canon::new();
-    c.bytes(DOMAIN_RESOLUTION);
-    c.bytes(d.escalation.as_str().as_bytes());
-    c.bytes(d.cleared_condition.detail.as_bytes());
-    write_dap(&mut c, &d.dap);
-    c.u64(d.at.0);
     c.finish()
 }
 

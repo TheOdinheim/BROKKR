@@ -255,9 +255,12 @@ impl ToleranceController for Heimdall {
     /// - **scoped** — an empty (blanket) scope is not narrow (OQGF-P-4 "never blanket") →
     ///   `OutOfScope`.
     fn grant_heuristic(&self, grant: ToleranceGrant) -> Result<GrantId, ToleranceError> {
+        // Ordered checks, first-failing reason returned (§6.7). Signature first: a grant that
+        // is not authentically the DAP's is refused **as forged** (`SignatureInvalid`, Rev 1.12)
+        // — not as `OutOfScope`, which would report a scope verdict that was never evaluated.
         let body = canonical::grant_signed_content(&grant);
         if !verify_under(&self.dap_public, &body, &grant.signature) {
-            return Err(ToleranceError::OutOfScope);
+            return Err(ToleranceError::SignatureInvalid);
         }
         if grant.scope.detail.is_empty() {
             return Err(ToleranceError::OutOfScope);

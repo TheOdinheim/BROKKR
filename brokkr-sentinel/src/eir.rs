@@ -23,14 +23,12 @@
 use std::sync::Mutex;
 
 use brokkr_core::crypto::DualSignature;
-use brokkr_core::ids::{EscalationId, Timestamp};
+use brokkr_core::ids::{EscalationId, Nonce, Timestamp};
 use brokkr_core::resolution::{
     ChronicEscalation, EscalationType, ResolutionDecision, ResolutionEngine, ResolutionVerdict,
-    ResolveError, ReturnedToBaseline,
+    ResolveError, ReturnedToBaseline, resolution_signed_content,
 };
 use brokkr_crypto::DualPublicKey;
-
-use crate::canonical;
 
 type PublicBytes = (Vec<u8>, Vec<u8>);
 
@@ -55,6 +53,17 @@ struct EscalationState {
 struct EirState {
     now: Timestamp,
     escalations: Vec<EscalationState>,
+    /// Nonces already accepted, keyed by `(escalation, nonce)` (OQGF-P-8.5 replay defence).
+    ///
+    /// **Held at the engine level, not on an `EscalationState`, and it PERSISTS across
+    /// resolution and re-raising.** A nonce is recorded here only when a decision *successfully
+    /// resolves*, and it is never removed — so a nonce accepted for an escalation id can never
+    /// be reused for that id, even after the escalation stands down and is raised again. Were
+    /// this tracked per-`EscalationState`, a re-raise would start with an empty set and a
+    /// captured stand-down could be replayed against the fresh escalation — exactly the hole
+    /// §6.8 warns of. Recording only on success (not on a hysteresis/criteria refusal) leaves a
+    /// legitimately-refused decision free to be re-presented once its hold window elapses.
+    accepted_nonces: Vec<(EscalationId, Nonce)>,
 }
 
 /// EIR.
@@ -71,6 +80,7 @@ impl Eir {
             state: Mutex::new(EirState {
                 now,
                 escalations: Vec::new(),
+                accepted_nonces: Vec::new(),
             }),
         }
     }
@@ -190,27 +200,57 @@ impl ResolutionEngine for Eir {
         }
     }
 
-    /// De-escalate — but only on a genuinely DAP-confirmed decision. The signature is verified
-    /// first: an unverifiable decision is refused with `NeedsDapConfirmation` (the asymmetry).
-    /// Resolution additionally requires readiness — a premature stand-down is refused
-    /// (`HysteresisNotSatisfied` / `CriteriaNotMet`), because where uncertain the system stays
-    /// escalated (OQGF-P-8.5). A chronic escalation may be stood down by a DAP-confirmed
-    /// decision (its re-justification/resolution, OQGF-P-8.6). Marking the escalation inactive
-    /// erases no incident record or detector — EIR holds none (OQGF-P-8.4).
+    /// De-escalate — but only on a genuinely DAP-confirmed, fresh, non-replayed decision.
+    ///
+    /// **Check order (first-failing reason returned, §6.8):**
+    /// 1. **Signature** — verified over `brokkr_core::resolution::resolution_signed_content` (the
+    ///    *one* encoding the issuer signs and the verifier checks). An unverifiable decision is
+    ///    not DAP-confirmed → `NeedsDapConfirmation`. This is first because the other fields of an
+    ///    unauthenticated decision — including its `nonce` and `expiry` — are untrustworthy.
+    /// 2. **Replay** — a `(escalation, nonce)` already accepted → `ReplayedNonce`. Checked
+    ///    *before* expiry so a decision that is both replayed and expired names the **attack**
+    ///    (a replayed stand-down) rather than the incidental latency; reporting `Expired` on a
+    ///    replay would be the misdirection Rev 1.13 forbids.
+    /// 3. **Expiry** — `now > expiry` → `Expired` (operational latency, not an attack).
+    /// 4. **Something to resolve** — no active escalation with this id → `CriteriaNotMet`.
+    /// 5. **Readiness** — a premature stand-down is refused (`HysteresisNotSatisfied` /
+    ///    `CriteriaNotMet`); where uncertain the system stays escalated (OQGF-P-8.5). A chronic
+    ///    escalation may be stood down by a DAP-confirmed decision (OQGF-P-8.6).
+    ///
+    /// The nonce is recorded as accepted **only on success**, so a decision refused for
+    /// hysteresis may be re-presented once its hold window elapses; a decision that actually
+    /// lowered a defence can never be replayed. Marking the escalation inactive erases no
+    /// incident record or detector — EIR holds none (OQGF-P-8.4).
     fn resolve(&self, d: ResolutionDecision) -> Result<ReturnedToBaseline, ResolveError> {
-        let body = canonical::resolution_signed_content(&d);
+        // 1. Authenticity.
+        let body = resolution_signed_content(&d);
         if !verify_under(&self.dap_public, &body, &d.signature) {
             return Err(ResolveError::NeedsDapConfirmation);
         }
 
         let mut st = self.state();
         let now = st.now;
+
+        // 2. Replay (attack) before 3. expiry (latency).
+        if st
+            .accepted_nonces
+            .iter()
+            .any(|(e, n)| *e == d.escalation && *n == d.nonce)
+        {
+            return Err(ResolveError::ReplayedNonce);
+        }
+        if now.0 > d.expiry.0 {
+            return Err(ResolveError::Expired);
+        }
+
+        // 4. Something to resolve.
         let idx = st
             .escalations
             .iter()
             .position(|e| e.active && e.kind.id == d.escalation)
             .ok_or(ResolveError::CriteriaNotMet)?;
 
+        // 5. Readiness.
         let readiness = {
             let e = st
                 .escalations
@@ -224,6 +264,8 @@ impl ResolutionEngine for Eir {
                 if let Some(e) = st.escalations.get_mut(idx) {
                     e.active = false;
                 }
+                // Accept the nonce ONLY now that the decision has lowered a defence.
+                st.accepted_nonces.push((d.escalation.clone(), d.nonce));
                 Ok(ReturnedToBaseline {
                     escalation: d.escalation,
                 })

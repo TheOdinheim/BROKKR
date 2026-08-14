@@ -400,6 +400,11 @@ fn write_resolution(c: &mut Canon, d: &ResolutionDecision) {
     c.bytes(d.cleared_condition.detail.as_bytes());
     write_dap(c, &d.dap);
     c.u64(d.at.0);
+    // Freshness fields (Rev 1.12), in struct field order — without them two decisions differing
+    // only in `nonce`/`expiry` would encode identically in the audit chain, and the spine would
+    // hold an incomplete account of the one act that lowers a defence.
+    c.u64(d.nonce.0);
+    c.u64(d.expiry.0);
     write_dual_signature(c, &d.signature);
 }
 
