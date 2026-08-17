@@ -541,6 +541,10 @@ fn test_i12_cleared_context_minted_only_via_clearance() {
     let cleared = AllowClearance.clear(
         Context {
             payload: "fn main() {}".into(),
+            datum: DatumRef::new("ctx-1"),
+            classification: Classification::Public,
+            personal: None,
+            bcr: None,
         },
         &dest,
     );
@@ -551,6 +555,10 @@ fn test_i12_cleared_context_minted_only_via_clearance() {
     let blocked = DenyClearance.clear(
         Context {
             payload: "SECRET".into(),
+            datum: DatumRef::new("ctx-2"),
+            classification: Classification::Secret,
+            personal: None,
+            bcr: None,
         },
         &dest,
     );

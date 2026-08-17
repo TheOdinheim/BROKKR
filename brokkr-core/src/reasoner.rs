@@ -1,17 +1,46 @@
 //! MÍMIR — the advisory reasoner (untrusted), and the [`ClearedContext`] type that
 //! makes an ungoverned context unable to reach a model (I-12).
 
-use crate::barrier::{BarrierVerdict, Destination};
+use crate::barrier::{BarrierVerdict, BoundaryCustodyRecord, Destination, PersonalDataTag};
+use crate::classification::Classification;
 use crate::gate::Action;
-use crate::ids::{HopId, ModelEndpointId};
+use crate::ids::{DatumRef, HopId, ModelEndpointId};
 use crate::intent::IntentScope;
 use alloc::string::String;
 
 /// The working context BROKKR would ship to a model. Untrusted, and — until
 /// cleared — unable to reach [`Reasoner::propose`].
+///
+/// **Not a bag of text — a payload plus the custody facts the Barrier decides on**
+/// (§6.6, OQGF-I-9/I-10). The four custody fields mirror what a
+/// [`BoundaryFlow::Egress`](crate::barrier::BoundaryFlow) needs **minus the
+/// destination** (which is the reasoner endpoint passed to
+/// [`ContextClearance::clear`]), because Phase 8.5 builds an egress flow out of
+/// exactly this.
+///
+/// **The facts ride on the context, not beside it.** A classification passed to
+/// `clear` as a separate argument could be passed wrongly, drift out of sync, or
+/// come from a different caller than the one that assembled the material. Carried on
+/// the type, the context *is* classified — the same reasoning that put the
+/// personal-data tag on the flow (Rev 1.7) rather than leaving it to a parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Context {
     pub payload: String,
+    /// Which datum this is, so a custody record can be matched to it (OQGF-I-9).
+    pub datum: DatumRef,
+    /// **Declared** by whoever assembled the context — the maximum classification of
+    /// the material that went into it — and **never inferred from the payload.**
+    /// Inferring sensitivity from unlabeled content is what OQGF-I-12 designates
+    /// Heuristic, and a Deterministic Gate SHALL NOT take its input from a heuristic
+    /// one; the content sentinel stays a backstop, never the gate's input.
+    pub classification: Classification,
+    /// The personal-data dimension, orthogonal to `classification` (OQGF-P-11.1) — a
+    /// context can be Public **and** personal. It travels with the context so Phase 8.5
+    /// does not short-circuit a Public personal context.
+    pub personal: Option<PersonalDataTag>,
+    /// The signed custody record. **Required above Public** (OQGF-I-9); `None` for
+    /// Public material.
+    pub bcr: Option<BoundaryCustodyRecord>,
 }
 
 /// A context that has passed the barrier and may be handed to a model.
@@ -21,12 +50,26 @@ pub struct Context {
 /// provided method below, which BIFRÖST (Phase 8.5) implements. This is the same
 /// structural device as `AuthorizedAction`, pointed at the model's *input*.
 ///
-/// The following does not compile — `inner` is private:
+/// The following does not compile — `inner` is private (the `Context` is built in full
+/// so the *only* error is the private field, not a missing-fields error). Constructing a
+/// struct literal with a private field is **E0451** — not E0616, which is private-field
+/// *access* (`value.inner`); the pre-Rev-1.14 annotation said E0616 and was never enforced
+/// by rustdoc (which only checks that compilation fails), corrected here to the code the
+/// compiler actually emits, verified by standalone compile:
 ///
-/// ```compile_fail,E0616
+/// ```compile_fail,E0451
 /// use brokkr_core::reasoner::{ClearedContext, Context};
-/// let _ = ClearedContext { inner: Context { payload: "src".into() } };
-/// // E0616: field `inner` of struct `ClearedContext` is private
+/// use brokkr_core::classification::Classification;
+/// use brokkr_core::ids::DatumRef;
+/// let ctx = Context {
+///     payload: "src".into(),
+///     datum: DatumRef::new("d"),
+///     classification: Classification::Public,
+///     personal: None,
+///     bcr: None,
+/// };
+/// let _ = ClearedContext { inner: ctx };
+/// // E0451: field `inner` of struct `ClearedContext` is private
 /// ```
 ///
 /// And a raw [`Context`] cannot be passed where a [`ClearedContext`] is required:
