@@ -3,15 +3,15 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.14
-**Supersedes:** Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.15
+**Supersedes:** Rev 1.14 (commit `13dcf0f`), Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
 **Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 14 August 2026 (Rev 1.14)
+**Date:** 17 August 2026 (Rev 1.15)
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** Rev 1.14 places what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
+**Disposes:** GAP-2026-08-17-001 (Phase 8.5 buildability check — `ContextClearance::evaluate_context` cannot reach the barrier's expiry check, and SINDRI evaluates chain freshness against a clock frozen at construction). Rev 1.14 placed what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
 
 ---
 
@@ -483,19 +483,22 @@ pub trait CostimulationGate: Send + Sync {
         identity: &Attestation,          // Signal 1 (OQGF-M-1)
         chain: &IntentProvenanceChain,   // Signal 2 (OQGF-M-8)
         action: &Action,
+        now: Timestamp,                  // I-13: per call, never held
     ) -> Result<(), AnergyReason>;
 
     /// Provided, and the sole minter of AuthorizedAction in the workspace.
     /// `mint` is private to the gate module, so an override gains nothing:
     /// it can only ever return Anergy.
     fn authorize(&self, identity: &Attestation, chain: &IntentProvenanceChain,
-                 action: Action) -> AuthorizationDecision { /* provided */ }
+                 action: Action, now: Timestamp) -> AuthorizationDecision { /* provided */ }
 }
 
 /// Produced ONLY by the provided `authorize`. No public constructor.
 /// Derives neither Clone nor Copy: a granted authorization cannot be duplicated.
 pub struct AuthorizedAction { /* private fields */ }
 ```
+
+**`now` is a parameter of both methods (I-13, new in Rev 1.15).** Signal 2's chain check enforces OQGF-M-14 freshness, and a gate that held the time at construction would compare an aging expiry against an equally aging present — the check passing while enforcing nothing. `authorize` takes it only to pass it through; the sealed-minter property is unaffected, since `mint` remains module-private and an override still gains nothing.
 
 The consequence is **fail-safe by construction**: an implementor of `CostimulationGate` cannot mint an `AuthorizedAction` even deliberately, because `mint` is module-private. The worst a buggy, misconfigured, or compromised SINDRI can do is **wrongly deny**. It cannot wrongly grant. This is I-1 enforced at a stronger point than "no public constructor" alone — the minter is not merely private, it is unreachable from the verdict logic. The `AuthorizedAction` type remains the structural heart: the executor accepts nothing else.
 
@@ -861,6 +864,24 @@ pub struct Context {
 **The classification is declared, not derived, and that settles the question §13 has carried since Rev 1.6.** A context is assembled from material BROKKR already holds at a known classification — source files, prior outputs, tool results. The assembler declares the maximum of what it put in. Nothing reads the payload to guess. The heuristic content sentinel (OQGF-I-12) remains a **backstop** that flags unlabeled sensitive material attempting egress; it is never the input to the deterministic gate, which is exactly what the corpus requires: *"a backstop to, never a replacement for, the deterministic enforcement of declared classification."*
 
 **The facts ride on the context rather than beside it.** A classification passed as a separate argument can be passed wrongly, drift out of sync, or be supplied by a different caller than the one that assembled the material. Carried on the type, the context **is** classified — the same reasoning that put the personal-data tag on the flow in Rev 1.7 rather than leaving it to a parameter.
+
+#### Clearing takes the current time (I-13, new in Rev 1.15)
+
+`ContextClearance::evaluate_context` delegates to the barrier's egress decision, and that decision evaluates a custody record's expiry — so the clearance surface must carry the current time to it:
+
+```rust
+pub trait ContextClearance: Send + Sync {
+    /// Verdict logic. Delegates to the Barrier; re-implements no egress condition.
+    fn evaluate_context(&self, ctx: &Context, dest: &Destination, now: Timestamp)
+        -> BarrierVerdict;
+
+    /// Provided, and the sole minter of ClearedContext (I-12).
+    fn clear(&self, ctx: Context, dest: &Destination, now: Timestamp)
+        -> Result<ClearedContext, BarrierVerdict> { /* provided */ }
+}
+```
+
+Without it, BIFRÖST could not call `Barrier::evaluate` at all — its signature requires a `Timestamp` — and the only ways to supply one would be to read a wall clock or to hold one at construction. **The first is forbidden and the second is I-13's defect.** `clear` takes it to pass through; it remains the sole minter of `ClearedContext`.
 
 #### Where the reasoner crossing's custody record comes from
 
@@ -1343,6 +1364,11 @@ Properties of the *code*, enforced by the type system. A violation is a build fa
 | **I-10** | No promotion without a signed CBOM, AIBOM, and Endpoint Registry, and no stale trust score. |
 | **I-11** | **`ModelEndpoint::client_cert` is a required field.** One-sided TLS to a reasoner is not representable (OQGF-M-5). |
 | **I-12** | **`Reasoner::propose` takes `ClearedContext`, which only BIFRÖST can mint.** An ungoverned context cannot be handed to a model — the function will not accept one. |
+| **I-13** | **A gate that evaluates an expiry takes `now` as a parameter of the evaluating call, never as construction state.** A stored clock does not fail; it silently stops catching expiry. |
+
+**I-13 is new in Rev 1.15, and it exists because a correct-sounding instruction produced a defeated check.** The Phase 4 build prompt required that freshness be *"an explicit parameter, never a wall-clock read"* — and a constructor parameter satisfies both clauses exactly. SINDRI took `now` in `Sindri::new` and checked intent-chain freshness against `self.now`, so a gate alive for six hours compared a six-hour-old expiry to a six-hour-old present. **The arithmetic works, the check passes, and OQGF-M-14 is enforced against nothing.** Nothing fails, nothing logs, and a review reading the code finds a freshness check that looks right.
+
+**The property is per-call, not not-a-wall-clock.** A gate may hold configuration — a bound, a blast radius, a resolver, a verifying key — because configuration is *supposed* to be fixed at construction. The current time is the opposite: it is the one input that is wrong the instant after it is read. Holding it makes a gate progressively more permissive the longer it lives, which is the worst direction for a failure nobody notices.
 
 **I-11 and I-12 are new in Rev 1.2**, and together they are the fix. I-11 makes an unauthenticated endpoint unrepresentable. I-12 makes an ungated context unpassable. Neither is a rule the code is asked to follow; both are shapes the code cannot take.
 
@@ -1475,6 +1501,7 @@ Named, not claimed eliminated.
 - **The promotion gate's findings have no identity either.** *(New in Rev 1.8.)* `DeterministicGateId::Genome` has existed since Phase 1, implying acceptances for OQGF-G-4 promotion-gate findings are anticipated — but Phase 5 built no acceptance path, and `brokkr-genome`'s findings carry no identity an acceptance could be scoped to. That is the same defect Rev 1.8 corrects for the Barrier, at a different gate. It is **not** corrected here: the Barrier is what blocks Phase 6, and reshaping the promotion gate's findings belongs with the phase that revisits REGIN. Named so it is a scheduled correction rather than a later discovery.
 - **Minimization is declared, not verified.** *(New in Rev 1.7.)* OQGF-P-11.2 requires Personal Data admitted to a Privileged Context to be *"minimized to what the declared Purpose requires."* The Barrier enforces that a Purpose **is declared**; whether the payload is actually minimal for it is a judgment about content, not a computable predicate — the same shape as the detail-level invariants Rev 1.5 declined to invent. **OQGF-P-11.2 is therefore PARTIAL**: the declaration is gated, the minimization is not. Closing it needs either content inspection (Heuristic under OQGF-I-12, and so outside a Deterministic Gate by construction) or a DAP attestation that the minimization was performed.
 - **A custody record binds to a datum reference, not to content bytes.** *(New in Rev 1.6.)* AMD-007's sketch describes the covered data as a *content digest*; the committed `DatumRef` is an opaque identity newtype. A BCR therefore states *which datum* it covers, not *what bytes* — a producer that re-points a reference at different content would still present a matching, validly-signed record. This is the same shape as AMD-007's own upstream-provenance-truth residual: signature verification proves who attested, not that the attestation is true. Closing it requires binding the BCR to a content digest and computing that digest at the boundary.
+- **The negotiated channel is a caller's assertion, not an observation.** *(New in Rev 1.15.)* BIFRÖST decides on the `NamedGroup` it is told the handshake agreed (§6.10). The handshake itself is out of scope for the governance spine — BROKKR performs no network I/O — so nothing structurally prevents a caller from asserting a PQC group over a connection that in fact landed on a classical one, and the channel-collapse rule would then permit a crossing the wire cannot carry. What bounds this is that the caller is BROKKR's own orchestrator running in BROKKR's own process, not a remote party; the crossing record names the asserted group, so a mismatch is discoverable against transport logs after the fact. Closing it requires observing the completed handshake directly from the TLS layer, which is a Phase-11 wiring concern rather than an architectural one.
 - **A self-issued custody record is only as good as the declaration behind it.** *(New in Rev 1.14; supersedes the Rev 1.6 entry on the reasoner's missing classification, which §6.6 now resolves by declaring it.)* BROKKR issues the BCR for its own reasoner crossings, because it is the party that assembled the data (§6.6). Policy bounds the destinations and the channel bounds what is reachable, so self-issuance is not self-authorization — but **nothing prevents a mis-declared classification.** If the assembler declares Public material that is actually Internal, the record is validly signed, policy-consistent, and wrong, and every downstream check honours it. This is the same shape as §13's entry on justifications: a signature proves who declared, never whether the declaration was true. The heuristic content sentinel (OQGF-I-12) is the backstop precisely here, and it is a backstop — it detects some mis-declarations after the fact and cannot be relied on to detect all of them.
 - **Declared roots of trust are pre-shared.** *(New in Rev 1.3.)* Trust in a hop's key rests on out-of-band registration, not on a hardware root of trust certifying that key at attestation time (§6.4.1).
 - **Detail-level invariants are not evaluated.** *(New in Rev 1.4.)* The policy register expresses invariants computable from the signed registers — forbidden capabilities and forbidden privilege classes. An invariant requiring interpretation of `Action.detail` (a path rule such as *read-only outside ./src*, or a content rule such as *no secret material in committed output*) is **not** expressible and is not enforced. Building it requires a path/content policy language and the tool-schema language it depends on; both are later work. SINDRI fails closed on any invariant it cannot evaluate, and Root Intent construction refuses an undeclared invariant (§6.2). Tracked as the open half of RISK-2026-0004.
@@ -1508,6 +1535,7 @@ Named, not claimed eliminated.
 | **OQGF-M-12 (cross-hop reconciliation)** | **PARTIAL — `brokkr-sentinel` builds the authorized-vs-executed comparison at Phase 8; `executed` is `None` until the executor exists (Phase 11), so the live stream and any statistic over it begin there (§6.7, Rev 1.11)** |
 | **OQGF-P-9.1 … P-9.3 (AMD-006)** | **`brokkr-core::barrier::{BarrierFinding, BarrierCondition}` carry the exact component identity and precise advisory an acceptance is scoped to; `FindingId` and `BarrierFinding::finding_id()` make that identity deterministic and pre-issuable; `RiskAcceptance::finding: FindingId` and `DeterministicGateId::Barrier` complete the link (§6.5, Rev 1.8). Enforcement is `brokkr-barrier` (Phase 6). P-9.4/P-9.5 PARTIAL until tolerance grants exist (Phase 8)** |
 | **OQGF-P-11.1, P-11.3, P-11.4 (AMD-009)** | **`brokkr-core::barrier::PersonalDataTag` — orthogonal to `Classification`; carried on both the flow and the BCR; egress condition 9 and the Privileged-Context ingress rule (§6.5, Rev 1.7). PARTIAL for P-11.2: the declared Purpose is gated, minimization is not (§13). P-11.5 crypto-shredding is `brokkr-crypto` (Phase 2); P-11.6/P-11.7 are SAGA (Phase 7)** |
+| **OQGF-M-14 (freshness), I-13** | **Every gate that evaluates an expiry receives `now` as a parameter of the evaluating call (§8, Rev 1.15): `Barrier::evaluate`, `CostimulationGate::{evaluate, authorize}`, `ContextClearance::{evaluate_context, clear}`, and the sentinel's resolution path. A gate holding a construction-time clock enforces freshness against nothing** |
 | **OQGF-I-9, I-10 (reasoner crossing)** | **`Context` carries `datum`, declared `classification`, `personal`, and a BCR (§6.6, Rev 1.14); BROKKR issues the record, its authorized destinations derived from REGIN's signed classification policy, and egress condition 8 evaluates the channel after it — a record cannot authorize what the channel cannot carry (§6.10)** |
 | **OQGF-I-12, I-15 (AMD-007)** | **Heuristic — the data-content sentinel and bypass detection belong to the sentinel network (HEIMDALL, Phase 8), not to the deterministic barrier (§6.5)** |
 | **OQGF-M-1 (attestation)** | **PARTIAL — `Attestation` per hop. SINDRI verifies key possession for a declared root of trust (§6.4.1) and binds identity to the chain's proven hop; `measurements` are not verified and no issuer exists (§6.4, §13)** |
@@ -1542,11 +1570,25 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 adds the reasoner-crossing row.
+**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 added the reasoner-crossing row; Rev 1.15 adds the I-13 freshness row.
 
 ---
 
 ## 15. Change log
+
+**Rev 1.15 — 17 August 2026. Disposes GAP-2026-08-17-001. Adds invariant I-13 and gives two sealed surfaces the current time, after the Phase-8.5 check found a freshness gate enforcing freshness against nothing.**
+
+**SINDRI held its clock.** `Sindri::new(resolver, now)` stored the time; `evaluate` checked intent-chain expiry against `self.now`. A gate alive for six hours therefore compared a six-hour-old expiry against a six-hour-old present — **the arithmetic works, the check passes, and OQGF-M-14 is enforced against nothing.** Nothing fails and nothing logs; a reviewer reading the code finds a freshness check that looks correct, with a comment stating it is *"never a wall-clock read"*, which is true.
+
+**The instruction that produced it was mine and it sounded right.** The Phase 4 build prompt required `now` to be *"an explicit parameter, never a wall-clock read."* A constructor parameter satisfies both clauses exactly. **The property is per-call, and it was never written down** — it lived in a build prompt, and build prompts are not audited.
+
+- **§8 — invariant I-13.** A gate that evaluates an expiry takes `now` as a parameter of the evaluating call, never as construction state. Made an invariant rather than prose because invariants are checked in every conformance pass and prose is skimmed.
+- **The distinction it draws.** A gate may hold a bound, a blast radius, a resolver, a verifying key — configuration is *supposed* to be fixed at construction. **The current time is the one input that is wrong the instant after it is read.** Holding it makes a gate progressively more permissive the longer it lives, which is the worst direction for a failure nobody notices.
+- **§6.4 — `CostimulationGate::evaluate` and `authorize` take `now`.** `authorize` only passes it through; `mint` stays module-private and an override still gains nothing, so the sealed-minter guarantee is untouched.
+- **§6.6 — `ContextClearance::evaluate_context` and `clear` take `now`.** Without it BIFRÖST cannot call `Barrier::evaluate` at all, whose signature requires a `Timestamp` — leaving only a wall-clock read, which is forbidden, or a held clock, which is I-13's defect. `clear` remains the sole minter of `ClearedContext`.
+- **§13 records what remains.** BIFRÖST decides on the `NamedGroup` it is *told* was negotiated. The handshake is out of scope for a spine that performs no network I/O, so nothing structurally prevents a caller asserting a PQC group over a connection that landed classical. The caller is BROKKR's own orchestrator, and the crossing record names the asserted group so a mismatch is discoverable afterward — but observing the completed handshake directly is Phase-11 wiring, not architecture.
+
+**On the blast radius, which was one line.** A workspace grep for a held clock found exactly one use: `brokkr-gate/src/sindri.rs:112`. HÚÐ, the promotion gate, SAGA, and EIR all already take `now` per call. **The single instance is the point rather than a reprieve** — it arrived by satisfying a correctly-worded instruction, so the next gate could arrive the same way. An invariant is checkable by grep in every future pass; an instruction in a build prompt is not.
 
 **Rev 1.14 — 14 August 2026. States what a reasoner crossing carries. §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five.**
 
@@ -1741,4 +1783,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.14.
+— End of BROKKR technical architecture, Rev 1.15.

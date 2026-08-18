@@ -1,10 +1,10 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.6
+**Version:** 1.7
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
-**Date:** 27 July 2026
+**Date:** 17 August 2026
 **Status:** Operative. These rules bind every build action in this repository.
 
 ---
@@ -116,6 +116,9 @@ No artifact is promotable without a present, signed CBOM, AIBOM, **and model end
 **I-12 — An ungoverned context cannot reach a model.**
 `Reasoner::propose` takes a `ClearedContext`, which has no public constructor and is minted only by `brokkr-bifrost` after a successful HÚÐ evaluation against the endpoint's **effective** authorization (OQGF-I-8…I-15, OQGF-M-5). The reasoner is a `Destination`; its effective authorization is the *lesser* of its registry ceiling and what the *actually negotiated* key-exchange group can carry (read via `wolfSSL_get_curve_name`, never the offered list). A context above that level is a deterministic Deny and is not sent. This is the same structural device as `AuthorizedAction`, pointed at the model's input rather than its output.
 
+**I-13 — A gate cannot enforce freshness against a clock it is holding.**
+A gate that evaluates an expiry takes `now` as a parameter of the **evaluating call**, never as construction state. A held clock does not fail — it silently stops catching expiry, and a gate alive for hours compares an aging expiry against an equally aging present: the arithmetic works, the check passes, and the requirement is enforced against nothing. A gate MAY hold a bound, a blast radius, a resolver, a verifying key; configuration is *supposed* to be fixed at construction. **The current time is the one input that is wrong the instant after it is read**, and holding it makes a gate progressively more permissive the longer it lives. This invariant exists because "an explicit parameter, never a wall-clock read" — the wording of a build prompt — is satisfied exactly by a constructor parameter, and SINDRI satisfied it that way for four phases. The property is *per-call*, and a property that lives only in a build prompt is not audited.
+
 Each invariant gets at least one **negative test** whose name carries the invariant ID. The negative tests are the load-bearing tests in this repository. A positive test proves the system works; a negative test proves it cannot be made to misbehave. When time is short, the negative tests are the ones that stay.
 
 ---
@@ -162,7 +165,7 @@ BROKKR is built **spine first, executor last**. This ordering is deliberate and 
 |---|---|---|
 | 0 | Readiness. Prove imports. Normalize structure. Build nothing. | *Complete — DAP approved* |
 | 0.5 | Re-readiness + conformance check of BROKKR-ARCH Rev 1.1. Build nothing. | *Complete — build stopped on GAP-2026-07-14-001; disposed by Rev 1.2* |
-| 1 | `brokkr-core` — governance types; invariants I-1 … I-4, I-8 … I-12 encoded; negative tests | DAP review; all negative tests passing |
+| 1 | `brokkr-core` — governance types; invariants I-1 … I-4, I-8 … I-13 encoded; negative tests | DAP review; all negative tests passing |
 | 2 | `brokkr-crypto` — wolfCrypt FFI; ML-DSA, **SLH-DSA**, **ML-KEM**, HMAC-SHA-384, AES-256-GCM | DAP review; FFI honesty rule verified |
 | 3 | `brokkr-intent` (SKULD) — IPC, attenuation, invariants, freshness | DAP review |
 | 4 | `brokkr-gate` (SINDRI) — the costimulation gate; `AuthorizedAction` minting | DAP review |
@@ -362,6 +365,12 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.7 — 17 August 2026.** Adds structural invariant **I-13**, aligning to Architecture Rev 1.15. One addition; nothing relaxed.
+
+- **Section 3 — I-13: a gate cannot enforce freshness against a clock it is holding.** `now` is a parameter of the evaluating call, never construction state. Found at the Phase-8.5 buildability check: `Sindri::new(resolver, now)` stored the time and `evaluate` checked intent-chain expiry against `self.now`, so a gate alive for six hours compared a six-hour-old expiry against a six-hour-old present. **The check passed and OQGF-M-14 was enforced against nothing** — no failure, no log, and a comment correctly stating it was never a wall-clock read.
+- **Why it is an invariant and not guidance.** The Phase 4 build prompt required `now` to be *"an explicit parameter, never a wall-clock read."* A constructor parameter satisfies both clauses exactly, which is how it happened and why it survived a DAP review. **A property that lives in a build prompt is not audited; an invariant is checked in every conformance pass and is findable by grep.** The workspace grep found exactly one instance — that the blast radius was one line is the point rather than a reprieve, because it arrived by following a correctly-worded instruction.
+- **Section 5.1** — the Phase 1 row now reads I-1 … I-4, I-8 … I-13.
 
 **v1.6 — 27 July 2026.** Aligns the build rules to Architecture Rev 1.3 and Rev 1.4, and corrects three stale references in these rules that no phase had yet tripped over. Every change adds, tightens, or corrects a miscount; nothing is relaxed.
 
