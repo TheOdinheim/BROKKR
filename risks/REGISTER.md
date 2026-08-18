@@ -325,6 +325,28 @@ open it. This entry tracks the window in which SINDRI's freshness check was defe
 recurred held-clock class, and the two residuals — the mechanical one (grep + review) and the
 deeper one (a verdict recorded on a test that could not fail).
 
+**UPDATE — 18 August 2026 (`brokkr-gate` revision, `reports/PHASE-4-REV-2026-08-18-R1.md`): the
+SINDRI half is closed; the risk remains Open.** `brokkr-gate` removed the held clock: the `now`
+field is gone from `Sindri` (which now holds only `resolver`), `Sindri::new` no longer takes a
+time, and `evaluate` threads the call-site `now` to `verify_chain_public`. The held-clock grep over
+`brokkr-gate/src` (broad enough to catch a **method** as well as a field, `self\.now`) returns
+**empty**. Critically, the **test that agreed with the defect was rewritten** to have a way to fail:
+`test_oqgf_m_14_i13_expiry_is_evaluated_against_call_time_not_a_held_clock` evaluates one chain
+twice with one instance (grant before expiry, `ChainExpired` after) — impossible to pass against a
+stored clock. OQGF-M-14 is now genuinely satisfied at SINDRI on that proof
+(`CONF-2026-08-18-P4-REV-R1`).
+
+- **NOT Executed, NOT closed.** The plan requires **both** corrections to land **and** the
+  workspace held-clock grep to return empty. `brokkr-bifrost` still holds `self.now()` (its held
+  clock governs BCR expiry, OQGF-I-9) and still fails to build with the expected `E0050`; the
+  workspace grep is therefore **not** empty. `plan.status` remains `TreatmentStatus::Open`.
+- **Remaining half:** the Phase 8.5 rebuild threads `now` into `brokkr-bifrost`'s
+  `evaluate_context` (and to `Barrier::evaluate`), after which the grep is re-run workspace-wide;
+  only an empty result closes this risk.
+- **Residuals unchanged.** The mechanical residual (no signature proves forwarding; grep + per-crate
+  review) and the deeper residual (a conformance verdict was recorded on a test that could not fail)
+  both stand; `likelihood: Possible`, `impact: Major`, `disposition: Reduce` unchanged.
+
 ---
 
 ## Register discipline (OQGF-P-10.6)

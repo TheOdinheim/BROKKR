@@ -158,12 +158,12 @@ fn assert_anergy(decision: AuthorizationDecision, expected: AnergyReason) {
 fn test_oqgf_m_11_valid_costimulation_grants() {
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
 
     // Signal 1 identity is the final hop (hop-2), which binds to the chain's last entry.
     let identity = attn(&hop2.subject);
     let act = action();
-    match sindri.authorize(&identity, &chain, act.clone()) {
+    match sindri.authorize(&identity, &chain, act.clone(), Timestamp(500)) {
         AuthorizationDecision::Granted(authorized) => {
             assert_eq!(
                 authorized.action(),
@@ -192,10 +192,10 @@ fn test_root_only_chain_binds_to_principal() {
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root); // no entries
-    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), Timestamp(500));
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal));
 
     // Root-only chain: identity binds to root.principal.
-    match sindri.authorize(&attn(&principal.subject), &chain, action()) {
+    match sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)) {
         AuthorizationDecision::Granted(_) => {}
         AuthorizationDecision::Anergy { reason } => {
             panic!("expected Granted for a valid root-only chain, got Anergy {{ {reason:?} }}");
@@ -209,11 +209,16 @@ fn test_root_only_chain_binds_to_principal() {
 fn test_oqgf_m_11_undeclared_identity_is_anergy() {
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
 
     // A subject the registry does not declare: resolution returns None.
     assert_anergy(
-        sindri.authorize(&attn(&SubjectId::new("stranger")), &chain, action()),
+        sindri.authorize(
+            &attn(&SubjectId::new("stranger")),
+            &chain,
+            action(),
+            Timestamp(500),
+        ),
         AnergyReason::IdentityUnverified,
     );
 }
@@ -226,11 +231,11 @@ fn test_oqgf_m_11_identity_does_not_bind_is_anergy() {
     // does not satisfy Signal 1.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
 
     // hop-1: declared, resolves, but not the final hop the chain proves.
     assert_anergy(
-        sindri.authorize(&attn(&hop1.subject), &chain, action()),
+        sindri.authorize(&attn(&hop1.subject), &chain, action(), Timestamp(500)),
         AnergyReason::IdentityUnverified,
     );
 }
@@ -252,24 +257,45 @@ fn test_root_only_chain_wrong_principal_is_anergy() {
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
     let reg = declare(declare(RegistryResolver::new(), &principal), &other);
-    let sindri = Sindri::new(reg, Timestamp(500));
+    let sindri = Sindri::new(reg);
 
     // `other` is declared (resolves) but != root.principal → binding fails.
     assert_anergy(
-        sindri.authorize(&attn(&other.subject), &chain, action()),
+        sindri.authorize(&attn(&other.subject), &chain, action(), Timestamp(500)),
         AnergyReason::IdentityUnverified,
     );
 }
 
 #[test]
-fn test_oqgf_m_14_expired_chain_is_anergy() {
+fn test_oqgf_m_14_i13_expiry_is_evaluated_against_call_time_not_a_held_clock() {
+    // OQGF-M-14 + I-13, and the load-bearing freshness test. The SAME gate instance
+    // evaluates the SAME chain twice, with the current time supplied at the CALL: a `now`
+    // before expiry grants; a `now` after expiry yields ChainExpired.
+    //
+    // Why this catches the defect the old test could not: a held clock is fixed at
+    // construction, so from one instance it can only ever produce ONE verdict for a given
+    // chain. Two different verdicts from one instance is therefore impossible under the
+    // pre-I-13 design — this test cannot pass against a stored clock. The old Phase-4 expiry
+    // test constructed `Sindri` with `now = 20_000` and evaluated once; because it injected
+    // the time at construction and never advanced it, it shared the defect's assumption and
+    // could not distinguish a stale held clock from a per-call one. It passed on the held
+    // clock precisely because it agreed with it.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2); // expiry 10_000
-    // now > expiry
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(20_000));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let identity = attn(&hop2.subject);
 
+    // now (500) < expiry (10_000): fresh -> Granted.
+    match sindri.authorize(&identity, &chain, action(), Timestamp(500)) {
+        AuthorizationDecision::Granted(_) => {}
+        AuthorizationDecision::Anergy { reason } => {
+            panic!("expected Granted before expiry, got Anergy {{ {reason:?} }}");
+        }
+    }
+
+    // SAME instance, SAME chain, now (20_000) > expiry (10_000): stale -> ChainExpired.
     assert_anergy(
-        sindri.authorize(&attn(&hop2.subject), &chain, action()),
+        sindri.authorize(&identity, &chain, action(), Timestamp(20_000)),
         AnergyReason::ChainExpired,
     );
 }
@@ -319,9 +345,9 @@ fn test_tampered_entry_signature_is_anergy() {
         )
         .unwrap();
 
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
     assert_anergy(
-        sindri.authorize(&attn(&hop2.subject), &tampered, action()),
+        sindri.authorize(&attn(&hop2.subject), &tampered, action(), Timestamp(500)),
         AnergyReason::ChainInvalid,
     );
 }
@@ -370,9 +396,9 @@ fn test_broken_hash_link_is_anergy() {
         )
         .unwrap();
 
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
     assert_anergy(
-        sindri.authorize(&attn(&hop2.subject), &broken, action()),
+        sindri.authorize(&attn(&hop2.subject), &broken, action(), Timestamp(500)),
         AnergyReason::ChainInvalid,
     );
 }
@@ -385,10 +411,10 @@ fn test_unresolvable_hop_is_anergy() {
     let chain = signed_2hop(&principal, &hop1, &hop2);
     // Declare principal and hop-2, but NOT hop-1.
     let reg = declare(declare(RegistryResolver::new(), &principal), &hop2);
-    let sindri = Sindri::new(reg, Timestamp(500));
+    let sindri = Sindri::new(reg);
 
     assert_anergy(
-        sindri.authorize(&attn(&hop2.subject), &chain, action()),
+        sindri.authorize(&attn(&hop2.subject), &chain, action(), Timestamp(500)),
         AnergyReason::IdentityUnverified,
     );
 }
@@ -403,9 +429,14 @@ fn test_i1_sindri_never_mints() {
     // rather than a grant.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), Timestamp(500));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
 
-    let decision = sindri.authorize(&attn(&SubjectId::new("nobody")), &chain, action());
+    let decision = sindri.authorize(
+        &attn(&SubjectId::new("nobody")),
+        &chain,
+        action(),
+        Timestamp(500),
+    );
     assert!(
         matches!(decision, AuthorizationDecision::Anergy { .. }),
         "a failing evaluate must yield Anergy, never a minted grant"

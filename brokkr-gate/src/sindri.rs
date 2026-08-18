@@ -20,30 +20,27 @@ use brokkr_intent::{IntentError, Skuld};
 /// no heterogeneous resolvers are needed at runtime, so `dyn` indirection would buy
 /// nothing.
 ///
-/// ## Why `now` is held in state
+/// ## `now` arrives per call, and is never held (I-13)
 ///
 /// The committed [`CostimulationGate::evaluate`] signature is
-/// `evaluate(&self, identity, chain, action)` — it carries **no** `now`. But freshness
-/// (OQGF-M-14) must be checked, and Rev 1.3 §6.4 requires the current time to be a
-/// **parameter, never a wall-clock read**. The only way to satisfy both, given the
-/// committed trait, is to inject the evaluation time at construction. SINDRI therefore
-/// holds `now` and threads it to [`Skuld::verify_chain_public`]; it never reads a clock.
-/// The caller (the Phase-11 orchestrator) constructs a `Sindri` with the current time per
-/// evaluation. This is a deviation from the §6.4 mermaid, which *illustrates*
-/// `evaluate(identity, chain, action, now)`; the committed trait is authoritative and the
-/// mermaid is illustrative (as Rev 1.2's `authorize` sketch was). See the phase report.
+/// `evaluate(&self, identity, chain, action, now)` (Rev 1.15 §6.4): the current time is a
+/// **parameter of the evaluating call**, and SINDRI threads it to
+/// [`Skuld::verify_chain_public`] for the OQGF-M-14 freshness check. It is **not** stored.
+/// A gate that held `now` at construction would compare an aging expiry against an equally
+/// aging present — the check passing while enforcing nothing (I-13); the earlier design did
+/// exactly that, and the freshness check was defeated for four phases (RISK-2026-0006).
+/// **The resolver is configuration and is fixed at construction; the time is not.** SINDRI
+/// never reads a wall clock — the Phase-11 orchestrator supplies the current time at each
+/// call.
 pub struct Sindri<R: KeyResolver> {
     resolver: R,
-    /// The evaluation time, supplied by the caller at construction. Never a wall-clock
-    /// read (OQGF-M-14 freshness is a parameter, Rev 1.3 §6.4).
-    now: Timestamp,
 }
 
 impl<R: KeyResolver> Sindri<R> {
-    /// Construct a gate over a resolver and an evaluation time. `now` is the caller's
-    /// current time; a fresh `Sindri` (or an updated `now`) is used per evaluation.
-    pub fn new(resolver: R, now: Timestamp) -> Self {
-        Self { resolver, now }
+    /// Construct a gate over a key-resolution seam. The resolver is configuration and is
+    /// fixed here; the evaluation time is **not** held — it arrives per call (I-13).
+    pub fn new(resolver: R) -> Self {
+        Self { resolver }
     }
 
     /// Signal 1 — identity (OQGF-M-1), per Rev 1.3 §6.4. Two requirements, either failure
@@ -86,7 +83,10 @@ impl<R: KeyResolver> Sindri<R> {
     /// [`Skuld::verify_chain_public`]. A root or hop that does not resolve yields
     /// [`AnergyReason::IdentityUnverified`] (we resolve fully and never pass a short slice,
     /// so `HopKeyMissing` is unreachable here — though it is still mapped, fail-closed).
-    fn signal_2(&self, chain: &IntentProvenanceChain) -> Result<(), AnergyReason> {
+    ///
+    /// `now` is the evaluating call's current time (I-13), threaded straight through to the
+    /// freshness check; `signal_2` holds no clock of its own.
+    fn signal_2(&self, chain: &IntentProvenanceChain, now: Timestamp) -> Result<(), AnergyReason> {
         let root = chain.root();
         let entries = chain.entries();
 
@@ -107,9 +107,10 @@ impl<R: KeyResolver> Sindri<R> {
         }
         let hop_refs: Vec<&DualPublicKey> = hop_pubs.iter().collect();
 
-        // Freshness (`self.now`) is threaded here — never a wall-clock read.
+        // Freshness (`now`, supplied at the call) is threaded here — never held, never a
+        // wall-clock read (I-13 / OQGF-M-14).
         Skuld
-            .verify_chain_public(root, entries, &root_pub, &hop_refs, self.now)
+            .verify_chain_public(root, entries, &root_pub, &hop_refs, now)
             .map_err(map_intent_error)
     }
 }
@@ -151,9 +152,10 @@ impl<R: KeyResolver> CostimulationGate for Sindri<R> {
         identity: &Attestation,
         chain: &IntentProvenanceChain,
         _action: &Action,
+        now: Timestamp,
     ) -> Result<(), AnergyReason> {
         self.signal_1(identity, chain)?;
-        self.signal_2(chain)?;
+        self.signal_2(chain, now)?;
         // Conjuncts 3 and 4 land here, before Phase 11 (Deferred-Conjunct Deadline, §6.4).
         Ok(())
     }
