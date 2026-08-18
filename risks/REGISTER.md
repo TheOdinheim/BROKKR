@@ -380,6 +380,31 @@ it. **They are out of the Phase 8.5 rebuild's scope** and are filed as **GAP-202
   test-agrees-with-the-defect shape. `likelihood: Possible`, `impact: Major`, `disposition: Reduce`
   unchanged.
 
+**UPDATE — 18 August 2026 (brokkr-sentinel I-13 revision attempt, `reports/PHASE-8-REV-2026-08-18-R1.md`):
+the sentinel fix is BLOCKED on a core prerequisite; and this risk's closure evidence was invalid.**
+
+- **The prior closure condition — an empty *workspace grep* — could not detect two of the sentinel
+  instances.** `EIR::classify` *takes* a `now` parameter (so a shape-matching grep reads it as
+  I-13-correct) yet its callers feed it the **held** `st.now`; the grep matches **shape**, not the
+  **property**. The corrected closure condition is the **exhaustive expiry/elapsed comparison table**
+  (every comparison traced to its time source; `PHASE-8-REV-2026-08-18-R1` / `CONF-2026-08-18-P8-REV-R1`),
+  and it is **not clean**: six comparisons read a per-call `now` (barrier ×3, genome, intent ×2), and
+  **four read a held clock** — `eir.rs:242` (decision expiry, P-8.5), `eir.rs:135–156` (dwell/hold/max
+  via `classify`, P-8.3/8.6), `eir.rs:289` (chronic, P-8.6), `heimdall.rs:268` (grant expiry, P-4).
+- **Corrected scope: three crates** (gate ✓, bifrost ✓, sentinel ✗), with sentinel carrying **four**
+  held-clock-sourced comparison sites across its two engines.
+- **The sentinel fix is BLOCKED.** All four defect sites are **core trait methods**
+  (`ResolutionEngine::{may_resolve, resolve, scan_chronic}`, `ToleranceController::grant_heuristic`),
+  and none takes `now`. Giving them a per-call `now` is a `brokkr-core` change — out of the sentinel
+  revision's scope, compiler-confirmed (E0050). Filed as **GAP-2026-08-18-002**, which recommends the
+  DAP place the core trait revision first (the `7d47d2a` pattern, extended to the two Physiology
+  traits), then re-issue the sentinel revision.
+- **Provisional verdicts recorded:** OQGF-P-4's Phase-8 satisfied verdict was **wrong at the time**
+  (grant expiry checked against a held clock, tested with a fixed `now`) → PARTIAL; P-8.5/8.3/8.6 →
+  PARTIAL for the same reason (`CONF-2026-08-18-P8-REV-R1`).
+- **Neither residual closed.** `likelihood: Possible`, `impact: Major`, `disposition: Reduce`
+  unchanged. `plan.status` remains `Open`.
+
 ---
 
 ## Register discipline (OQGF-P-10.6)
