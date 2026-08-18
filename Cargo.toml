@@ -13,6 +13,7 @@ members = [
     "brokkr-barrier",
     "brokkr-audit",
     "brokkr-sentinel",
+    "brokkr-bifrost",
 ]
 
 [workspace.package]

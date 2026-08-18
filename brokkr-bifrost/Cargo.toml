@@ -1,0 +1,22 @@
+[package]
+name = "brokkr-bifrost"
+description = "BIFRÖST — the guarded crossing to a reasoner (§6.10). Assembles a BoundaryFlow::Egress from a Context's custody facts (Rev 1.14) and delegates the egress decision to HÚÐ — one gate, one logic; it re-implements no egress condition. The effective ceiling collapses to what the negotiated channel can carry (min of the endpoint ceiling and the channel strength), so a classical handshake denies above-Public regardless of the endpoint's declared ceiling. mTLS is a type-level guarantee (ModelEndpoint::client_cert is required, not Option). Produces a crossing record as a value; mints nothing. Pure logic, no unsafe. Phase 8.5."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# BIFRÖST reasons over the committed crossing/flow types (brokkr-core) and delegates the egress
+# decision to HÚÐ's Barrier (brokkr-barrier) — "one gate, one logic" (§6.6). brokkr-crypto is
+# a transitive dependency through brokkr-barrier (which verifies BCR signatures); BIFRÖST signs
+# nothing itself. I-5: brokkr-bifrost is a governance crate that depends on brokkr-barrier and
+# (transitively) brokkr-crypto, and brokkr-reasoner depends on IT — never the reverse. It SHALL
+# NOT depend on brokkr-reasoner, brokkr-tools, or brokkr-cli. I-6: BIFRÖST does not call a model.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-barrier = { path = "../brokkr-barrier" }
+
+[dev-dependencies]
+# The tests build valid, signed BCRs and DAP-verifying keys to exercise the real HÚÐ gate.
+brokkr-crypto = { path = "../brokkr-crypto" }

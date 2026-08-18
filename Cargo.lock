@@ -19,6 +19,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "brokkr-bifrost"
+version = "0.1.0"
+dependencies = [
+ "brokkr-barrier",
+ "brokkr-core",
+ "brokkr-crypto",
+]
+
+[[package]]
 name = "brokkr-core"
 version = "0.1.0"
 

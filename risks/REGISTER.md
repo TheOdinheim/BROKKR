@@ -347,6 +347,39 @@ stored clock. OQGF-M-14 is now genuinely satisfied at SINDRI on that proof
   review) and the deeper residual (a conformance verdict was recorded on a test that could not fail)
   both stand; `likelihood: Possible`, `impact: Major`, `disposition: Reduce` unchanged.
 
+**UPDATE — 18 August 2026 (Phase 8.5 rebuild, `reports/PHASE-8.5-REBUILD-2026-08-18-R2.md`): the
+BIFRÖST half is closed; the risk is STILL Open, and its scope is now known to be wider than two
+crates.** `brokkr-bifrost` removed its held clock: the `now: Mutex<Timestamp>` field, `set_now`,
+`now_guard`, and `now()` are deleted (no interior mutability remains); `evaluate_context` threads the
+call-site `now` to `Barrier::evaluate`; a two-verdict test (`clear` twice on one instance, Allow
+before BCR expiry, Deny(Expired) after) proves it. The four-pattern grep over `brokkr-bifrost/src` is
+empty, and **the whole workspace builds and tests green — 153 passed, 0 failed** (the first green
+workspace since the I-13 core revision).
+
+**NOT closed — the closure condition surfaced a THIRD held clock.** This risk's closure condition is
+an **empty workspace grep**, and running it workspace-wide (Task 4) found that `brokkr-sentinel`
+holds two clocks the two-crate framing of this entry did not anticipate:
+
+- `EirState.now` (`eir.rs:54`) — EIR checks the **resolution-decision expiry** against it
+  (`eir.rs:242`, OQGF-P-8.5, **the act that lowers a defence**).
+- `HeimdallState.now` (`heimdall.rs:42`) — HEIMDALL checks the **tolerance-grant expiry** against it
+  (`heimdall.rs:268`, OQGF-P-4).
+
+Both are genuine I-13 violations (`resolve` and the grant-application take no `now` parameter — they
+read held state), predating I-13 (sentinel is Phase 8; I-13 is Rev 1.15) and never reviewed against
+it. **They are out of the Phase 8.5 rebuild's scope** and are filed as **GAP-2026-08-18-001**.
+
+- **What the closure this revision delivers actually covers: the BIFRÖST half, and only that.** The
+  SINDRI half closed 18 Aug; the BIFRÖST half closes here; the **sentinel half is outstanding**.
+- **`plan.status` remains `TreatmentStatus::Open`.** The workspace grep is not empty until a
+  DAP-placed `brokkr-sentinel` I-13 revision threads `now` through `resolve`/`may_resolve`/
+  `scan_chronic` and the grant-application path and removes the two held fields.
+- **The two residuals are explicitly NOT closed.** The mechanical residual stands. The **deeper
+  residual is now demonstrated a third time**: the sentinel clocks sat under P-4/P-8.5 conformance
+  checks whose fixed-`now` fixtures could not have caught a held clock — the same
+  test-agrees-with-the-defect shape. `likelihood: Possible`, `impact: Major`, `disposition: Reduce`
+  unchanged.
+
 ---
 
 ## Register discipline (OQGF-P-10.6)
