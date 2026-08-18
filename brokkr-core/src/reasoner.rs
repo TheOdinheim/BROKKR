@@ -4,7 +4,7 @@
 use crate::barrier::{BarrierVerdict, BoundaryCustodyRecord, Destination, PersonalDataTag};
 use crate::classification::Classification;
 use crate::gate::Action;
-use crate::ids::{DatumRef, HopId, ModelEndpointId};
+use crate::ids::{DatumRef, HopId, ModelEndpointId, Timestamp};
 use crate::intent::IntentScope;
 use alloc::string::String;
 
@@ -119,16 +119,57 @@ error_enum! {
 /// BROKKR-ARCH 6.10. An implementor supplies only the barrier decision
 /// ([`evaluate_context`](Self::evaluate_context)); it cannot mint a
 /// [`ClearedContext`] itself.
+///
+/// **I-13 — the current time is a call parameter, not construction state.** Omitting
+/// `now` does not compile (wrong argument count). As with the gate, this proves the
+/// *call site* supplies the time; it does not prove an implementor forwards it rather
+/// than ignoring it and reading a stored clock (revision report):
+///
+/// ```compile_fail,E0061
+/// use brokkr_core::reasoner::{Context, ContextClearance};
+/// use brokkr_core::barrier::{BarrierVerdict, Destination};
+/// use brokkr_core::ids::Timestamp;
+/// struct C;
+/// impl ContextClearance for C {
+///     fn evaluate_context(&self, _c: &Context, _d: &Destination, _n: Timestamp) -> BarrierVerdict {
+///         BarrierVerdict::Allow
+///     }
+/// }
+/// fn call(c: &C, ctx: Context, dest: &Destination) {
+///     // Missing `now`: E0061, this method takes 3 arguments but 2 were supplied.
+///     let _ = c.clear(ctx, dest);
+/// }
+/// ```
 pub trait ContextClearance: Send + Sync {
     /// Evaluate an outbound context against a destination. Deny/Quarantine block;
     /// Allow/AcceptedRisk proceed (AcceptedRisk keeps its finding visible
     /// elsewhere — AMD-006).
-    fn evaluate_context(&self, ctx: &Context, dest: &Destination) -> BarrierVerdict;
+    ///
+    /// **`now` is a parameter of the evaluating call, never construction state
+    /// (I-13).** An implementor delegates the decision to
+    /// [`Barrier::evaluate`](crate::barrier::Barrier::evaluate), whose signature
+    /// *requires* a [`Timestamp`] — so without `now` here BIFRÖST could not call the
+    /// barrier at all, leaving only a wall-clock read (forbidden) or a clock held at
+    /// construction (I-13's defect: BCR expiry checked against a time that ages with
+    /// the gate, passing while enforcing nothing).
+    fn evaluate_context(&self, ctx: &Context, dest: &Destination, now: Timestamp)
+    -> BarrierVerdict;
 
     /// Clear a context for the reasoner. Mints a [`ClearedContext`] only on a
     /// proceed verdict; otherwise returns the blocking verdict.
-    fn clear(&self, ctx: Context, dest: &Destination) -> Result<ClearedContext, BarrierVerdict> {
-        match self.evaluate_context(&ctx, dest) {
+    ///
+    /// **`now` is passed straight through to
+    /// [`evaluate_context`](Self::evaluate_context) (I-13).** `clear` remains the sole
+    /// minter of [`ClearedContext`] (I-12); threading the current time as an argument
+    /// changes nothing about that — the type has no public constructor and this is its
+    /// only mint site.
+    fn clear(
+        &self,
+        ctx: Context,
+        dest: &Destination,
+        now: Timestamp,
+    ) -> Result<ClearedContext, BarrierVerdict> {
+        match self.evaluate_context(&ctx, dest, now) {
             BarrierVerdict::Allow | BarrierVerdict::AcceptedRisk { .. } => {
                 Ok(ClearedContext::mint(ctx))
             }

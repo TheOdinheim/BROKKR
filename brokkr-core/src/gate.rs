@@ -2,7 +2,7 @@
 //! that is the structural heart of BROKKR (I-1).
 
 use crate::crypto::Attestation;
-use crate::ids::ToolId;
+use crate::ids::{Timestamp, ToolId};
 use crate::intent::IntentProvenanceChain;
 use alloc::string::String;
 
@@ -36,13 +36,18 @@ pub enum AnergyReason {
 /// nothing else, so there is no code path by which a tool executes without one.
 ///
 /// The following does not compile — `action` is private and there is no
-/// constructor:
+/// constructor. Constructing a struct literal with a private field is **E0451** — not
+/// E0616, which is private-field *access* (`value.action`); the annotation said E0616
+/// and rustdoc never enforced it (it only checks that compilation fails, not why),
+/// corrected here to the code the compiler actually emits, verified by standalone
+/// compile:
 ///
-/// ```compile_fail,E0616
+/// ```compile_fail,E0451
 /// use brokkr_core::gate::{Action, AuthorizedAction};
 /// use brokkr_core::ids::ToolId;
 /// let a = Action { tool: ToolId::new("write"), detail: "f".into() };
-/// let _ = AuthorizedAction { action: a }; // E0616: field `action` of struct `AuthorizedAction` is private
+/// let _ = AuthorizedAction { action: a };
+/// // E0451: field `action` of struct `AuthorizedAction` is private
 /// ```
 ///
 /// Nor can the minter be called from outside the crate:
@@ -61,14 +66,15 @@ pub enum AnergyReason {
 /// ```compile_fail,E0599
 /// use brokkr_core::gate::{Action, AnergyReason, AuthorizationDecision, CostimulationGate};
 /// use brokkr_core::crypto::Attestation;
+/// use brokkr_core::ids::Timestamp;
 /// use brokkr_core::intent::IntentProvenanceChain;
 /// struct G;
 /// impl CostimulationGate for G {
-///     fn evaluate(&self, _i: &Attestation, _c: &IntentProvenanceChain, _a: &Action)
+///     fn evaluate(&self, _i: &Attestation, _c: &IntentProvenanceChain, _a: &Action, _n: Timestamp)
 ///         -> Result<(), AnergyReason> { Ok(()) }
 /// }
-/// fn dup(g: &G, id: &Attestation, ch: &IntentProvenanceChain, a: Action) {
-///     if let AuthorizationDecision::Granted(authorized) = g.authorize(id, ch, a) {
+/// fn dup(g: &G, id: &Attestation, ch: &IntentProvenanceChain, a: Action, now: Timestamp) {
+///     if let AuthorizationDecision::Granted(authorized) = g.authorize(id, ch, a, now) {
 ///         let _copy = authorized.clone(); // E0599: no method named `clone` found
 ///     }
 /// }
@@ -104,24 +110,62 @@ pub enum AuthorizationDecision {
 /// [`authorize`](Self::authorize) is the sole minter in the entire workspace.
 /// Overriding `authorize` gains an implementor nothing: `mint` is private to this
 /// module, so an override can only ever return `Anergy` (fail-safe).
+///
+/// **I-13 — the current time is a call parameter, not construction state.** A caller
+/// cannot invoke the gate without supplying `now`; omitting it does not compile
+/// (wrong argument count). This proves the *call site* supplies the time; it does not
+/// prove an implementor *forwards* it rather than ignoring it and reading a stored
+/// value — that residual is per-crate review and the workspace grep, not core's type
+/// system (see the revision report):
+///
+/// ```compile_fail,E0061
+/// use brokkr_core::gate::{Action, AnergyReason, CostimulationGate};
+/// use brokkr_core::crypto::Attestation;
+/// use brokkr_core::ids::Timestamp;
+/// use brokkr_core::intent::IntentProvenanceChain;
+/// struct G;
+/// impl CostimulationGate for G {
+///     fn evaluate(&self, _i: &Attestation, _c: &IntentProvenanceChain, _a: &Action, _n: Timestamp)
+///         -> Result<(), AnergyReason> { Ok(()) }
+/// }
+/// fn call(g: &G, id: &Attestation, ch: &IntentProvenanceChain, a: Action) {
+///     // Missing `now`: E0061, this method takes 4 arguments but 3 were supplied.
+///     let _ = g.authorize(id, ch, a);
+/// }
+/// ```
 pub trait CostimulationGate: Send + Sync {
     /// Verdict logic. `Ok(())` grants; `Err(reason)` yields anergy. Both Signal 1
     /// (identity) and Signal 2 (chain) must be checked here (OQGF-M-11).
+    ///
+    /// **`now` is a parameter of the evaluating call, never construction state
+    /// (I-13).** Signal 2's chain check enforces OQGF-M-14 freshness, and a gate that
+    /// held the time at construction would compare an aging expiry against an equally
+    /// aging present — the check passing while enforcing nothing. The current time is
+    /// the one input that is wrong the instant after it is read, so it is supplied per
+    /// call, not stored.
     fn evaluate(
         &self,
         identity: &Attestation,
         chain: &IntentProvenanceChain,
         action: &Action,
+        now: Timestamp,
     ) -> Result<(), AnergyReason>;
 
     /// The only path to an [`AuthorizedAction`].
+    ///
+    /// **`now` is passed straight through to [`evaluate`](Self::evaluate) and used for
+    /// nothing else here (I-13).** Threading it as an argument does not touch the
+    /// sealed-minter guarantee (I-1): `mint` is module-private and `authorize` remains
+    /// its only caller, so an override of `authorize` still cannot mint and can only
+    /// ever return `Anergy`.
     fn authorize(
         &self,
         identity: &Attestation,
         chain: &IntentProvenanceChain,
         action: Action,
+        now: Timestamp,
     ) -> AuthorizationDecision {
-        match self.evaluate(identity, chain, &action) {
+        match self.evaluate(identity, chain, &action, now) {
             Ok(()) => AuthorizationDecision::Granted(AuthorizedAction::mint(action)),
             Err(reason) => AuthorizationDecision::Anergy { reason },
         }

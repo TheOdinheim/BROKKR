@@ -93,6 +93,11 @@ fn action() -> Action {
     }
 }
 
+/// A concrete evaluation time. I-13: the gate and the clearance take `now` as a
+/// per-call argument, so every call site supplies one — this is that argument. It is
+/// well before the fixtures' `expiry` (10_000), so freshness never trips these tests.
+const NOW: Timestamp = Timestamp(1_000);
+
 // ---------------------------------------------------------------------------
 // I-1 — AuthorizedAction is minted only by the gate.
 // ---------------------------------------------------------------------------
@@ -104,6 +109,7 @@ impl CostimulationGate for GrantingGate {
         _identity: &brokkr_core::crypto::Attestation,
         _chain: &IntentProvenanceChain,
         _action: &Action,
+        _now: Timestamp,
     ) -> Result<(), AnergyReason> {
         Ok(())
     }
@@ -116,6 +122,7 @@ impl CostimulationGate for DenyingGate {
         _identity: &brokkr_core::crypto::Attestation,
         _chain: &IntentProvenanceChain,
         _action: &Action,
+        _now: Timestamp,
     ) -> Result<(), AnergyReason> {
         Err(AnergyReason::OutOfScope)
     }
@@ -124,14 +131,14 @@ impl CostimulationGate for DenyingGate {
 #[test]
 fn test_i1_authorized_action_minted_only_by_gate() {
     // The sanctioned path yields a grant carrying the action.
-    match GrantingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action()) {
+    match GrantingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action(), NOW) {
         AuthorizationDecision::Granted(authorized) => {
             assert_eq!(authorized.action(), &action());
         }
         AuthorizationDecision::Anergy { .. } => panic!("expected a grant from the granting gate"),
     }
     // A refusing gate yields anergy — never a forged grant.
-    match DenyingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action()) {
+    match DenyingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action(), NOW) {
         AuthorizationDecision::Anergy { reason } => assert_eq!(reason, AnergyReason::OutOfScope),
         AuthorizationDecision::Granted(_) => panic!("a denying gate must not grant"),
     }
@@ -143,11 +150,12 @@ fn test_i1_authorized_action_minted_only_by_gate() {
 fn test_i1_authorize_is_sole_construction_path() {
     // The ONLY way to obtain an `AuthorizedAction` is `CostimulationGate::authorize`.
     // Every other path is closed and proven by compile_fail doctests on the type:
-    //   - no public constructor          (E0616, private field `action`)
+    //   - no public constructor          (E0451, private field `action` in a struct literal)
     //   - no access to the minter        (E0624, private fn `mint`)
     //   - no duplication of a grant       (E0599, no `clone` — the type is not Clone)
     // Here we confirm the sanctioned path yields one, and that it is move-only.
-    let decision = GrantingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action());
+    let decision =
+        GrantingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action(), NOW);
     let authorized = match decision {
         AuthorizationDecision::Granted(a) => a,
         AuthorizationDecision::Anergy { .. } => panic!("granting gate must yield a grant"),
@@ -158,7 +166,7 @@ fn test_i1_authorize_is_sole_construction_path() {
 
     // A denying gate produces no AuthorizedAction whatsoever — anergy, not a grant.
     assert!(matches!(
-        DenyingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action()),
+        DenyingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action(), NOW),
         AuthorizationDecision::Anergy { .. }
     ));
 }
@@ -511,14 +519,24 @@ fn test_i11_endpoint_carries_a_required_client_cert() {
 
 struct AllowClearance;
 impl ContextClearance for AllowClearance {
-    fn evaluate_context(&self, _ctx: &Context, _dest: &Destination) -> BarrierVerdict {
+    fn evaluate_context(
+        &self,
+        _ctx: &Context,
+        _dest: &Destination,
+        _now: Timestamp,
+    ) -> BarrierVerdict {
         BarrierVerdict::Allow
     }
 }
 
 struct DenyClearance;
 impl ContextClearance for DenyClearance {
-    fn evaluate_context(&self, _ctx: &Context, _dest: &Destination) -> BarrierVerdict {
+    fn evaluate_context(
+        &self,
+        _ctx: &Context,
+        _dest: &Destination,
+        _now: Timestamp,
+    ) -> BarrierVerdict {
         BarrierVerdict::Deny {
             finding: BarrierFinding {
                 datum: DatumRef::new("d-2"),
@@ -547,6 +565,7 @@ fn test_i12_cleared_context_minted_only_via_clearance() {
             bcr: None,
         },
         &dest,
+        NOW,
     );
     assert!(cleared.is_ok());
     assert_eq!(cleared.unwrap().get().payload, "fn main() {}");
@@ -561,10 +580,66 @@ fn test_i12_cleared_context_minted_only_via_clearance() {
             bcr: None,
         },
         &dest,
+        NOW,
     );
     assert!(matches!(blocked, Err(BarrierVerdict::Deny { .. })));
     // That a raw Context cannot reach `Reasoner::propose`, and that ClearedContext
     // has no public constructor, are compile_fail doctests on the reasoner module.
+}
+
+// ---------------------------------------------------------------------------
+// I-13 — the current time is a call-site parameter, never construction state.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_i13_now_is_a_call_site_parameter() {
+    // What core CAN prove: all four freshness-bearing methods — `evaluate`,
+    // `authorize`, `evaluate_context`, `clear` — REQUIRE a `Timestamp` argument, so no
+    // implementor can be invoked without one supplied at the call site. Here that is
+    // exercised from the positive side (the calls compile only because `now` is
+    // passed); the compile-time half — that omitting `now` does NOT compile (E0061) —
+    // is proven by the `compile_fail,E0061` doctests on `CostimulationGate` and
+    // `ContextClearance`.
+    let dest = Destination::Reasoner {
+        endpoint: ModelEndpointId::new("mimir-1"),
+        negotiated: NamedGroup::X25519MlKem768,
+    };
+    let ctx = Context {
+        payload: "fn main() {}".into(),
+        datum: DatumRef::new("ctx-i13"),
+        classification: Classification::Public,
+        personal: None,
+        bcr: None,
+    };
+
+    // Gate: both methods take `now` last.
+    assert!(
+        GrantingGate
+            .evaluate(
+                &attestation(),
+                &chain_with_scope(&["write"]),
+                &action(),
+                NOW
+            )
+            .is_ok()
+    );
+    assert!(matches!(
+        GrantingGate.authorize(&attestation(), &chain_with_scope(&["write"]), action(), NOW),
+        AuthorizationDecision::Granted(_)
+    ));
+    // Clearance: both methods take `now` last.
+    assert_eq!(
+        AllowClearance.evaluate_context(&ctx, &dest, NOW),
+        BarrierVerdict::Allow
+    );
+    assert!(AllowClearance.clear(ctx, &dest, NOW).is_ok());
+
+    // What core CANNOT prove, stated plainly: this shows the CALL SITE supplies the
+    // time. It does NOT prove an implementor *forwards* `now` to its freshness check
+    // rather than ignoring the argument and reading a clock stored in its own struct.
+    // No type in core can forbid an implementor from holding a `Timestamp` field. That
+    // residual is discharged by per-crate review (SINDRI, BIFRÖST) and the workspace
+    // grep for a held clock, not by core's type system — see the revision report.
 }
 
 // ---------------------------------------------------------------------------
