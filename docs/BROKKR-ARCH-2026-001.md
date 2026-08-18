@@ -3,15 +3,15 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.15
-**Supersedes:** Rev 1.14 (commit `13dcf0f`), Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.16
+**Supersedes:** Rev 1.15 (commit `174d023`), Rev 1.14 (commit `13dcf0f`), Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
 **Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 17 August 2026 (Rev 1.15)
+**Date:** 18 August 2026 (Rev 1.16)
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** GAP-2026-08-17-001 (Phase 8.5 buildability check — `ContextClearance::evaluate_context` cannot reach the barrier's expiry check, and SINDRI evaluates chain freshness against a clock frozen at construction). Rev 1.14 placed what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
+**Disposes:** GAP-2026-08-18-001 and -002 (brokkr-sentinel revision — a tolerance grant could not be observed to suppress anything, and an expired resolution decision was unreachable behind the replay check). Rev 1.15 disposed GAP-2026-08-17-001 (Phase 8.5 buildability check — `ContextClearance::evaluate_context` cannot reach the barrier's expiry check, and SINDRI evaluates chain freshness against a clock frozen at construction). Rev 1.14 placed what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
 
 ---
 
@@ -1000,6 +1000,73 @@ pub struct HostHarmIncident {
 
 A storm needs a **declared blast radius** to be measured against — the DAP declares the largest response magnitude that is not, in itself, an incident, and a response exceeding it is a `StormEvent` whether or not its target was right. Undeclared, the bound cannot be exceeded and P-5b is unenforceable. Both autoimmunity and storms are raised through the graded-response path and recorded, on the principle that the defense harming the host is itself an incident, not a side effect to be tolerated.
 
+#### The evaluation loop — when a detector actually runs (new in Rev 1.16)
+
+Rev 1.11 specified a `Detector`, an `Observation`, a `DetectionVerdict`, screening, tolerance grants, and host-harm accounting. **It never said when a detector runs.** A builder implementing every one of those correctly produces a crate in which detectors are registered and never consulted, grants are validated and discarded, and the only observation ever examined is the one hard-coded path that cross-hop reconciliation needed. That is what Phase 8 produced, and every component in it is accurate about itself. **The missing thing was not a component; it was the composition**, and no component is responsible for noticing that it is never called.
+
+**The loop.** Every `Observation` HEIMDALL is fed passes through it. There is no observation kind that is examined by one path and ignored by the rest:
+
+```mermaid
+flowchart TD
+    A["observe(observation, now)"] --> B["Every REGISTERED detector<br/>observes it (OQGF-I-6)"]
+    B --> C{"Any Fired?"}
+    C -->|No| D["No signal. Detection is silent<br/>when nothing fires."]
+    C -->|Yes| E{"A live grant covers<br/>this detector?"}
+    E -->|"Yes — in scope,<br/>unexpired at now"| F["SUPPRESSED. Recorded, not raised.<br/>(OQGF-P-4)"]
+    E -->|"No, or expired at now"| G["Raise-only Signal<br/>(OQGF-P-7)"]
+    A --> H["Cross-hop reconciliation<br/>on a Hop (OQGF-M-12)"]
+    H --> C
+```
+
+```rust
+/// The single entry point. Every observation goes through here; nothing is
+/// examined by a side path.
+pub fn observe(&self, o: &Observation, now: Timestamp) -> Vec<Detection>;
+
+/// What one detector concluded about one observation, and what became of it.
+pub struct Detection {
+    pub detector: DetectorId,
+    pub severity: Severity,
+    pub detail: String,
+    /// `Some(grant)` when a live grant suppressed it; `None` when it raised.
+    pub suppressed_by: Option<GrantId>,
+    /// The raise-only Signal, present only when NOT suppressed.
+    pub signal: Option<Signal>,
+}
+```
+
+**A suppressed firing is recorded, never discarded.** OQGF-P-4 suppresses a *false alarm*, not the *evidence that a detector fired*. A `Detection` carrying `suppressed_by: Some(..)` is the record that the detector fired and that a named, signed, scoped grant is why nothing was raised. **Discarding it would make a tolerance grant indistinguishable from a detector that was never registered**, and would leave no way to notice that a grant is suppressing far more than the false positive it was written for.
+
+**Cross-hop reconciliation joins the loop rather than sitting beside it.** A `Hop` whose `executed` differs from its `authorized` is a deviation and raises posture — that is unchanged from Rev 1.11. What changes is that the deviation is one detection among however many the registered detectors produce for the same observation, subject to the same suppression rule. It is not a separate method with its own path.
+
+#### Tolerance grants are retained, because suppression needs them to exist
+
+Rev 1.11 said grants are signed, scoped, and expiring, and specified the validation. **It did not say they are kept.** A validator that returns a `GrantId` and drops the grant satisfies every sentence Rev 1.11 wrote and suppresses nothing.
+
+```rust
+/// Grants HEIMDALL currently holds. `grant_heuristic` validates AND retains;
+/// the loop consults this set on every firing.
+grants: Vec<(GrantId, ToleranceGrant)>,
+```
+
+**A grant is live for a firing when all three hold** — checked in this order, so a failure names the first true reason:
+
+| # | Condition | On failure |
+|---|---|---|
+| 1 | Its signature verifies under the declared DAP key | `SignatureInvalid` at issuance; a stored grant was already checked |
+| 2 | Its scope covers the firing detector | Not this detector's grant — the firing raises |
+| 3 | `now <= grant.expiry` | **The grant is spent. The firing raises.** |
+
+**Condition 3 is the one OQGF-P-4 exists for, and it is why I-13 matters here more than anywhere.** A grant that never expires is a permanently silenced detector, and a silenced detector produces no evidence that anything is wrong — the failure is toward *blindness*, which is the only direction in this system where nothing downstream notices. An expiry evaluated against a held clock is therefore not a stale-data problem; it is a detector that stays off forever. `now` arrives with the observation (I-13).
+
+**An expired grant is not removed on expiry.** It stops being live and stays in the register, because OQGF-P-9.5's standing inventory of what has been tolerated is a record of decisions taken, not of decisions still in force. Removal would erase the history of what was once suppressed and for how long.
+
+#### What the loop does not do
+
+- **It does not authorize.** `DetectionVerdict` has no permitting variant and `PostureEffect` has only `Raise`, so no path through the loop lowers posture or grants anything. The strongest outcome is a raise-only Signal (OQGF-P-7.4).
+- **It does not deliver.** `observe` returns `Detection` values; the orchestrator (Phase 11) routes signals and records detections to SAGA. HEIMDALL is fed and produces; it does not reach into other crates.
+- **It does not confirm.** A firing is not a host-harm incident and not a seeding incident. Both require a DAP to say which it was — a `HostHarmIncident` for a confirmed false positive (OQGF-P-1), a `SeedingIncident` for a confirmed true positive (OQGF-P-6.1). **The loop produces candidates; a human produces verdicts.** Nothing in the loop increments the host-harm numerator.
+
 #### Cross-hop reconciliation (OQGF-M-12) — the mechanism now, the statistic later
 
 > *"The action actually executed at each hop SHALL be reconciled against the Root Intent."*
@@ -1067,6 +1134,10 @@ pub struct ResolutionDecision {
 **The signed content is `escalation`, `cleared_condition`, `dap`, `at`, `nonce`, `expiry` — everything except the signature** — canonically encoded under a domain tag distinct from every other signed artifact in the system. **The encoding lives in `brokkr-core`**, beside the decision type, and the placement is the point: a resolution decision is **signed by a DAP tool and verified by EIR — two parties, two crates.** An encoding defined only in the verifier forces the issuer to reproduce it from source, and a single disagreement about field order or length-prefixing rejects every legitimate decision **while looking exactly like an attack**. This is the reasoning that put `BarrierFinding::finding_id()` in core: **where two parties must agree on bytes, the bytes are defined once, where both can see them.**
 
 **A decision expires and carries a nonce.** Rev 1.11 and earlier gave it neither. A signature that verifies today verifies forever, so a decision captured once could be replayed later — when the escalation it clears is real and current. **Resolution is the one act in BROKKR that lowers a defense**, and it was the only signed artifact in the system without freshness: a `ToleranceGrant` expires, a `Signal` carries a nonce and an expiry, a `RiskAcceptance` expires, a BCR expires. EIR SHALL refuse a decision whose `now > expiry`, and SHALL refuse a `nonce` it has already accepted for that escalation.
+
+**The expiry check runs before the replay check (corrected in Rev 1.16).** Rev 1.13 ordered them replay-first, reasoning that a decision which is both replayed and expired should report the attack rather than the latency. That reasoning is sound and the ordering it produced is not: **a decision reaching the expiry check must carry a nonce EIR has never accepted**, so an expired decision that was previously accepted is refused as `ReplayedNonce` and never as `Expired`. The `Expired` arm became unreachable for the case it exists to catch, and a check that cannot be reached cannot be demonstrated to work.
+
+Rev 1.13's own description of an expiry settles the order: *"a slow DAP, a queued approval, or clock skew"* — every one of those is a **fresh** decision arriving late, never a replayed one. **The two conditions do not overlap in practice**, so ordering them to disambiguate an overlap traded a reachable check for a distinction that does not arise. Expiry is evaluated first; replay second. A decision that is somehow both still reports `Expired`, which is the honest reading — a decision too old to act on is too old regardless of how many times it has been seen.
 
 **A refusal SHALL name the reason it actually is (new in Rev 1.13).** Rev 1.12 required both refusals and left `ResolveError` at `CriteriaNotMet`, `HysteresisNotSatisfied`, and `NeedsDapConfirmation` — **none of which describes either one.** `ResolveError` therefore gains two variants:
 
@@ -1501,6 +1572,7 @@ Named, not claimed eliminated.
 - **The promotion gate's findings have no identity either.** *(New in Rev 1.8.)* `DeterministicGateId::Genome` has existed since Phase 1, implying acceptances for OQGF-G-4 promotion-gate findings are anticipated — but Phase 5 built no acceptance path, and `brokkr-genome`'s findings carry no identity an acceptance could be scoped to. That is the same defect Rev 1.8 corrects for the Barrier, at a different gate. It is **not** corrected here: the Barrier is what blocks Phase 6, and reshaping the promotion gate's findings belongs with the phase that revisits REGIN. Named so it is a scheduled correction rather than a later discovery.
 - **Minimization is declared, not verified.** *(New in Rev 1.7.)* OQGF-P-11.2 requires Personal Data admitted to a Privileged Context to be *"minimized to what the declared Purpose requires."* The Barrier enforces that a Purpose **is declared**; whether the payload is actually minimal for it is a judgment about content, not a computable predicate — the same shape as the detail-level invariants Rev 1.5 declined to invent. **OQGF-P-11.2 is therefore PARTIAL**: the declaration is gated, the minimization is not. Closing it needs either content inspection (Heuristic under OQGF-I-12, and so outside a Deterministic Gate by construction) or a DAP attestation that the minimization was performed.
 - **A custody record binds to a datum reference, not to content bytes.** *(New in Rev 1.6.)* AMD-007's sketch describes the covered data as a *content digest*; the committed `DatumRef` is an opaque identity newtype. A BCR therefore states *which datum* it covers, not *what bytes* — a producer that re-points a reference at different content would still present a matching, validly-signed record. This is the same shape as AMD-007's own upstream-provenance-truth residual: signature verification proves who attested, not that the attestation is true. Closing it requires binding the BCR to a content digest and computing that digest at the boundary.
+- **A component can be correct and never be called.** *(New in Rev 1.16.)* Phase 8 built a `Detector` trait, a registry, a screening path, a grant validator, and a host-harm monitor — each accurate about itself, each documented honestly, and none of them wired to the others. **No component is responsible for noticing that it is never invoked**, and no review of a component finds it. What found it was asking what happens when a detector fires, which is a question about composition rather than about any part. This is a **class** of defect a specification can reduce but not eliminate: Rev 1.16 specifies the loop, and the next set of components will have the same exposure until something asks the same question of them. The practical mitigation is that a conformance check enumerating a requirement SHALL identify the code path that satisfies it end to end, not the types that appear in it.
 - **The negotiated channel is a caller's assertion, not an observation.** *(New in Rev 1.15.)* BIFRÖST decides on the `NamedGroup` it is told the handshake agreed (§6.10). The handshake itself is out of scope for the governance spine — BROKKR performs no network I/O — so nothing structurally prevents a caller from asserting a PQC group over a connection that in fact landed on a classical one, and the channel-collapse rule would then permit a crossing the wire cannot carry. What bounds this is that the caller is BROKKR's own orchestrator running in BROKKR's own process, not a remote party; the crossing record names the asserted group, so a mismatch is discoverable against transport logs after the fact. Closing it requires observing the completed handshake directly from the TLS layer, which is a Phase-11 wiring concern rather than an architectural one.
 - **A self-issued custody record is only as good as the declaration behind it.** *(New in Rev 1.14; supersedes the Rev 1.6 entry on the reasoner's missing classification, which §6.6 now resolves by declaring it.)* BROKKR issues the BCR for its own reasoner crossings, because it is the party that assembled the data (§6.6). Policy bounds the destinations and the channel bounds what is reachable, so self-issuance is not self-authorization — but **nothing prevents a mis-declared classification.** If the assembler declares Public material that is actually Internal, the record is validly signed, policy-consistent, and wrong, and every downstream check honours it. This is the same shape as §13's entry on justifications: a signature proves who declared, never whether the declaration was true. The heuristic content sentinel (OQGF-I-12) is the backstop precisely here, and it is a backstop — it detects some mis-declarations after the fact and cannot be relied on to detect all of them.
 - **Declared roots of trust are pre-shared.** *(New in Rev 1.3.)* Trust in a hop's key rests on out-of-band registration, not on a hardware root of trust certifying that key at attestation time (§6.4.1).
@@ -1528,7 +1600,7 @@ Named, not claimed eliminated.
 | OQGF-I-6 (graded response) | `brokkr-sentinel` posture raise via coordinated signal |
 | OQGF-I-7 (recorded resolution) | `brokkr-sentinel` (EIR) — `ResolutionDecision`, never a timeout |
 | **OQGF-I-8 … I-11, I-13, I-14 (AMD-007)** | **`brokkr-barrier` (HÚÐ), Phase 6 — `BoundaryFlow` as a directional sum type; the `BoundaryCustodyRecord` and its eight-condition egress gate; ingress quarantine gated on `ContextClass`; the uncontrolled-channel register (§6.5, Rev 1.6). I-13's recording is Organ 5 (Phase 7)** |
-| **OQGF-I-6, P-3, P-4 (heuristic layer, screening, tolerance)** | **`brokkr-sentinel` (HEIMDALL), Phase 8 — the `Detector`/`Observation` surface, `SelfSetCorpus` seam with the mandatory corpus-digest binding, and the sealed `ToleranceController::grant` that refuses a Deterministic target (§6.7, Rev 1.11)** |
+| **OQGF-I-6, P-3, P-4 (heuristic layer, screening, tolerance)** | **`brokkr-sentinel` (HEIMDALL) — the `Detector`/`Observation` surface, the `SelfSetCorpus` seam with its mandatory corpus-digest binding, the sealed `ToleranceController::grant` refusing a Deterministic target, **and the evaluation loop that runs registered detectors over every observation and consults retained grants for suppression (§6.7, Rev 1.16)**. Rev 1.11 specified the components and not the composition; Phase 8's I-6 and P-4 verdicts were recorded on a crate where a detector never detected and a grant never suppressed** |
 | **OQGF-P-8.2, P-8.5 (resolution is an act; no autonomous lowering)** | **`brokkr-core::resolution::ResolutionDecision` with a committed signed-content encoding, a nonce, and an expiry (§6.8, Rev 1.12); EIR refuses a decision that does not verify under the declared DAP key (`NeedsDapConfirmation`), is expired (`ResolveError::Expired`), or replays a nonce (`ResolveError::ReplayedNonce`) — two variants, not one, because latency and attack are different events (Rev 1.13). The encoding lives in core because a decision is signed by one party and verified by another** |
 | **OQGF-P-4 (tolerance grants signed, scoped, expiring)** | **`brokkr-sentinel` verifies dual-family under the declared DAP key; `ToleranceError::SignatureInvalid` (Rev 1.12) reports a forged grant as forged rather than as out-of-scope, first-failing check only (§6.7)** |
 | **OQGF-P-1, P-5 (host harm, autoimmunity, storms)** | **`brokkr-sentinel` — numerator is DAP-confirmed `HostHarmIncident`s, denominator is governed actions evaluated; storms measured against a declared blast radius. The rate is a lower bound (§13) (§6.7, Rev 1.11)** |
@@ -1570,11 +1642,24 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 added the reasoner-crossing row; Rev 1.15 adds the I-13 freshness row.
+**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 added the reasoner-crossing row; Rev 1.15 added the I-13 freshness row; Rev 1.16 amends the I-6/P-3/P-4 row for the evaluation loop.
 
 ---
 
 ## 15. Change log
+
+**Rev 1.16 — 18 August 2026. Disposes GAP-2026-08-18-001 and -002. Specifies the evaluation loop §6.7 described components for and never connected, and corrects an ordering that made EIR's expiry check unreachable.**
+
+**Rev 1.11 specified a `Detector`, an `Observation`, a `DetectionVerdict`, screening, tolerance grants, and host-harm accounting — and never said when a detector runs.** Phase 8 implemented every one of those correctly. The result is a crate where detectors are registered and consulted only during screening, a grant is validated and dropped on return, and the sole observation ever examined is the one hard-coded branch cross-hop reconciliation needed. **OQGF-I-6's heuristic layer is absent, not defective**, and OQGF-P-4's tolerance suppresses nothing because there is nothing to attach suppression to.
+
+- **§6.7 — the evaluation loop is placed.** One entry point: every observation passes through every registered detector; firings are checked against live grants; unsuppressed firings raise a Signal. No observation kind is examined by one path and ignored by the rest, and cross-hop reconciliation joins the loop rather than sitting beside it as its own method.
+- **A suppressed firing is recorded, never discarded.** OQGF-P-4 suppresses a false alarm, not the evidence that a detector fired. Without the record, **a tolerance grant is indistinguishable from a detector that was never registered**, and nothing can notice a grant suppressing far more than the false positive it was written for.
+- **Grants are retained.** Rev 1.11 said they are signed, scoped, and expiring, and specified the validation — it never said they are *kept*. A validator returning a `GrantId` and dropping the grant satisfies every sentence Rev 1.11 wrote. Retention is what the loop consults.
+- **An expired grant stops being live and stays in the register.** OQGF-P-9.5's standing inventory records decisions *taken*, not decisions still in force; removal would erase what was once suppressed and for how long.
+- **Why I-13 bites hardest here.** A grant whose expiry is checked against a held clock never expires, so the detector it silences stays silenced. **A silenced detector produces no evidence that anything is wrong** — the only failure direction in this system where nothing downstream notices.
+- **§6.8 — the expiry and replay checks are reordered.** Rev 1.13 put replay first so a decision that is both would report the attack. But a decision reaching the expiry check must carry an unseen nonce, so an expired-and-previously-accepted decision is refused as `ReplayedNonce` and never as `Expired`: **the arm became unreachable for the case it exists to catch.** Rev 1.13's own gloss on an expiry — *"a slow DAP, a queued approval, or clock skew"* — describes a **fresh** decision arriving late, never a replayed one. The conditions do not overlap in practice, so ordering to disambiguate an overlap traded a reachable check for a distinction that does not arise.
+
+**On the failure mode, which is new.** The prior defects were assertions the types could not support, sections that were operationally empty, or claims made stale by later revisions. This one is different: **every component was correct, documented honestly, and never called.** `reconcile`'s doc comment states plainly that any non-`Hop` observation yields `None`. The detector list is documented as *"resolved by id during screening"*, which is exactly what it was used for. Nothing lied. **No component is responsible for noticing it is never invoked**, and no review of a component finds it — only asking *what happens when a detector fires* does, and that is a question about composition. §13 records it as a class rather than an instance, with the practical mitigation: a conformance check enumerating a requirement identifies the code path that satisfies it end to end, not the types that appear in it.
 
 **Rev 1.15 — 17 August 2026. Disposes GAP-2026-08-17-001. Adds invariant I-13 and gives two sealed surfaces the current time, after the Phase-8.5 check found a freshness gate enforcing freshness against nothing.**
 
@@ -1783,4 +1868,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.15.
+— End of BROKKR technical architecture, Rev 1.16.
