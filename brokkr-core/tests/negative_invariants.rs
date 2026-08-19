@@ -477,6 +477,33 @@ fn test_i9_refined_detector_is_heuristic_and_activation_is_gated() {
 }
 
 // ---------------------------------------------------------------------------
+// OQGF-P-6.2 — the corpus-validity variants name the EVIDENCE, not the candidate
+// (GAP-2026-08-19-001). This is the executable form of the gap's principle: an
+// error variant is a claim about what happened, and reporting a candidate defect
+// for a corpus-validity failure would be a false claim in the audit record.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_oqgf_p_6_2_corpus_validity_errors_name_the_evidence_not_the_candidate() {
+    let substituted = AdaptError::SubstitutedCorpus.to_string();
+    let stale = AdaptError::StaleCorpus.to_string();
+
+    // Each names what happened to the CORPUS (the evidence) ...
+    assert!(substituted.contains("corpus") && substituted.contains("digest"));
+    assert!(stale.contains("corpus") && stale.contains("current version"));
+    // ... and says NOTHING about the candidate. A message reworded to imply a
+    // candidate defect would fail here — which is the whole point of the gap.
+    assert!(!substituted.contains("candidate"));
+    assert!(!stale.contains("candidate"));
+
+    // They are distinct from each other (tampering vs drift) and from the
+    // candidate-quality variants they must never be conflated with.
+    assert_ne!(AdaptError::SubstitutedCorpus, AdaptError::StaleCorpus);
+    assert_ne!(substituted, AdaptError::Overfit.to_string());
+    assert_ne!(stale, AdaptError::CoverageRegression.to_string());
+}
+
+// ---------------------------------------------------------------------------
 // I-10 / I-11 — genome and endpoint require their fields (positive side; the
 // missing-field cases are compile_fail doctests).
 // ---------------------------------------------------------------------------

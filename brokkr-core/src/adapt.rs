@@ -134,10 +134,40 @@ pub struct PriorGeneration {
 
 error_enum! {
     /// Why a maturation step was refused. Each is a poisoning gate.
+    ///
+    /// **A refusal names the reason it actually is.** The corpus-validity variants
+    /// [`SubstitutedCorpus`](Self::SubstitutedCorpus) and [`StaleCorpus`](Self::StaleCorpus) are
+    /// **two variants, not one**, and both are distinct from the candidate-quality variants
+    /// [`Overfit`](Self::Overfit) and [`CoverageRegression`](Self::CoverageRegression): a
+    /// substitution is *tampering* — a corpus chosen to make the candidate look good — while a
+    /// stale version is *drift* — an old but genuine corpus. Both are failures of the
+    /// **evidence**, not of the candidate, and when a corpus-validity check fires **nothing about
+    /// the candidate has been measured.** Reusing `Overfit` or `CoverageRegression` for a
+    /// corpus-validity failure would falsely claim the candidate is defective when the evidence is
+    /// invalid — a positive false claim about a candidate that may be excellent. An error variant
+    /// is a claim about what happened, and a false claim in a refusal is a false claim in the
+    /// audit record. This is the same correction made three times before, now a fourth:
+    /// [`crate::tolerance::ToleranceError::SignatureInvalid`] (Rev 1.12), and
+    /// [`crate::resolution::ResolveError::Expired`] / [`crate::resolution::ResolveError::ReplayedNonce`]
+    /// (Rev 1.13), and these two (GAP-2026-08-19-001, disposed by this revision).
     pub enum AdaptError {
         UnconfirmedSeed => "refinement may only be seeded by a DAP-confirmed incident (OQGF-P-6.1)",
         Overfit => "candidate improves only on its seeding sample (OQGF-P-6.2)",
         CoverageRegression => "candidate degrades coverage elsewhere in the corpus (OQGF-P-6.2)",
+        /// The evaluation corpus digest does not match the declared record: **tampering** — a
+        /// corpus chosen to make the candidate look good (OQGF-P-6.2). The digest check runs
+        /// *before* any measurement, so when this fires **nothing about the candidate has been
+        /// measured** — the candidate may be excellent or poor; the evidence is invalid, and that
+        /// is all this says. It is NOT `Overfit`/`CoverageRegression`, which would falsely claim a
+        /// candidate defect (GAP-2026-08-19-001).
+        SubstitutedCorpus => "the evaluation corpus digest does not match the declared record (OQGF-P-6.2)",
+        /// The evaluation corpus is not the current version: **drift, not an attack** — an old but
+        /// genuine corpus, so the candidate was evaluated against evidence that no longer reflects
+        /// the current state. Returned by selection against a superseded corpus, and at activation
+        /// when the provenance names a superseded corpus version (OQGF-P-6.2). Distinct from
+        /// `SubstitutedCorpus` because drift is not tampering — a forensic reader wants the two
+        /// apart, the same judgment that split `Expired` from `ReplayedNonce`.
+        StaleCorpus => "the evaluation corpus is not the current version (OQGF-P-6.2)",
         FailsTolerance => "candidate raises host harm above the bound, regardless of detection gains (OQGF-P-6.3)",
         NeedsApproval => "activation requires DAP approval at Enhanced (OQGF-P-6.6)",
     }
