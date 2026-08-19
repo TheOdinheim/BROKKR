@@ -146,10 +146,19 @@ pub struct DetectorSpec {
     pub id: DetectorId,
 }
 
-/// A passed central-tolerance screening.
+/// A passed central-tolerance screening (OQGF-P-3).
+///
+/// Carries the Self Set `version` it screened against and the `produced_at` time it
+/// was produced. **Version equality, not recency, is the gate** (§6.12): a screen
+/// pass one minute old against a superseded Self Set is invalid — it certified a
+/// detector against a baseline that is no longer "self" — while a pass a week old
+/// against the current Self Set is valid. `produced_at` is the **audit trail** that
+/// lets [`crate::adapt::MaturationPipeline::activate`] flag a version-current but
+/// implausibly-old pass; it is never the check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenPass {
     pub version: SelfSetVersion,
+    pub produced_at: Timestamp,
 }
 
 /// The tolerance controller (HEIMDALL, Phase 8).

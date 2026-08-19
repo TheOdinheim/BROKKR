@@ -5,9 +5,21 @@
 //! conversion, or setter that makes it `Deterministic` (OQGF-P-2). Activation is
 //! gated ([`MaturationPipeline::activate`] returns `Err(FailsTolerance)` /
 //! `Err(NeedsApproval)`).
+//!
+//! ## The evaluation-corpus content seam is *not* here (Rev 1.17, §6.12)
+//!
+//! §6.12 specifies an `EvaluationCorpusContent` trait — `version()`, labeled
+//! `samples()`, `digest()` — that Gate 2 (selection, OQGF-P-6.2) measures against.
+//! Its `samples()` are `(Observation, Option<AttackClass>)` pairs, and `Observation`
+//! is a **`brokkr-sentinel`** type. `brokkr-core` SHALL NOT depend on
+//! `brokkr-sentinel` (**I-5**), so the seam **cannot live in core** and is not placed
+//! here. It is a Phase-9 crate-local type in `brokkr-adapt`, beside its only consumer
+//! ([`MaturationPipeline::select`]). [`AttackClass`] is a core type (below);
+//! `Observation` is not, and moving it into core to make the seam fit is exactly the
+//! dependency inversion I-5 forbids.
 
 use crate::crypto::DualSignature;
-use crate::ids::{CorpusVersion, Dap, DetectorId, IncidentId};
+use crate::ids::{CorpusVersion, Dap, DetectorId, IncidentId, Timestamp};
 use crate::tolerance::{ResponseClass, ScreenPass};
 use alloc::string::String;
 
@@ -98,10 +110,19 @@ pub struct EvaluationCorpus {
     pub version: CorpusVersion,
 }
 
-/// A passed independent-corpus selection.
+/// A passed independent-corpus selection (OQGF-P-6.2).
+///
+/// Carries the `version` it was selected against and the `produced_at` time it was
+/// produced. **Version equality, not recency, is the gate** (§6.12): a pass one
+/// minute old against a superseded corpus is invalid — it selected against evidence
+/// that is no longer the declared corpus — while a pass a week old against the
+/// current corpus is valid. `produced_at` is the **audit trail** that lets
+/// [`MaturationPipeline::activate`] flag a version-current but implausibly-old pass;
+/// it is never the check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectionPass {
     pub version: CorpusVersion,
+    pub produced_at: Timestamp,
 }
 
 /// A handle to the generation replaced by an activation, so every activation is
@@ -139,9 +160,20 @@ pub trait MaturationPipeline: Send + Sync {
     /// Activate only after selection, tolerance screening, and (at Enhanced) DAP
     /// approval. Returns the prior generation so activation is reversible
     /// (OQGF-P-6.3, P-6.5, P-6.6).
+    ///
+    /// Takes `now` per call (**I-13**): a clock held from construction silently stops
+    /// catching an aging pass. `now` is **not itself the gate** — **version equality
+    /// is** (§6.12). A Phase-9 implementor refuses a [`SelectionPass`] or
+    /// [`ScreenPass`](crate::tolerance::ScreenPass) whose version is not the current
+    /// one (a gate that did not run against the thing it was required to run against);
+    /// `now` is the audit trail that makes a version-current but implausibly-old pass
+    /// visible. This method carries `now` because it is the one that *evaluates* a
+    /// pass against the present; [`generate`](Self::generate) and
+    /// [`select`](Self::select) evaluate no time and take none.
     fn activate(
         &self,
         candidate: RefinedDetector,
         provenance: DetectorProvenance,
+        now: Timestamp,
     ) -> Result<PriorGeneration, AdaptError>;
 }

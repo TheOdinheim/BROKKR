@@ -283,6 +283,7 @@ impl ToleranceController for MockController {
     ) -> Result<ScreenPass, ToleranceError> {
         Ok(ScreenPass {
             version: SelfSetVersion::new("selfset-1"),
+            produced_at: Timestamp(10),
         })
     }
     fn host_harm(&self) -> HostHarmReport {
@@ -413,12 +414,14 @@ impl MaturationPipeline for MockPipeline {
     ) -> Result<SelectionPass, AdaptError> {
         Ok(SelectionPass {
             version: CorpusVersion::new("corpus-1"),
+            produced_at: Timestamp(20),
         })
     }
     fn activate(
         &self,
         _candidate: RefinedDetector,
         _provenance: DetectorProvenance,
+        _now: Timestamp,
     ) -> Result<PriorGeneration, AdaptError> {
         if self.fails_tolerance {
             Err(AdaptError::FailsTolerance)
@@ -434,6 +437,7 @@ fn provenance() -> DetectorProvenance {
         corpus_version: CorpusVersion::new("corpus-1"),
         screen_result: ScreenPass {
             version: SelfSetVersion::new("selfset-1"),
+            produced_at: Timestamp(10),
         },
         approver: dap(),
         signature: dual_sig(),
@@ -459,7 +463,7 @@ fn test_i9_refined_detector_is_heuristic_and_activation_is_gated() {
         MockPipeline {
             fails_tolerance: true
         }
-        .activate(detector.clone(), provenance()),
+        .activate(detector.clone(), provenance(), Timestamp(30)),
         Err(AdaptError::FailsTolerance)
     );
     // Without DAP approval, activation is refused at Enhanced.
@@ -467,7 +471,7 @@ fn test_i9_refined_detector_is_heuristic_and_activation_is_gated() {
         MockPipeline {
             fails_tolerance: false
         }
-        .activate(detector, provenance()),
+        .activate(detector, provenance(), Timestamp(30)),
         Err(AdaptError::NeedsApproval)
     );
 }
