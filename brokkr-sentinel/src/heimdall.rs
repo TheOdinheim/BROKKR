@@ -5,12 +5,14 @@
 //! governed-action count; it does not reach into other crates (I-5). It holds a signing key
 //! (to sign the raise-only Signals it emits) and the DAP's public key (to verify tolerance
 //! grants). Mutable state sits behind a `Mutex`; a poisoned lock is recovered, never
-//! panicked on (§6). `now` is **injected**, never read from a wall clock — determinism.
+//! panicked on (§6). **The current time is not held (I-13):** it arrives as a parameter of
+//! [`Heimdall::observe`], the evaluating call, and is used for the grant-liveness expiry check
+//! — never read from a wall clock and never stored.
 
 use std::sync::Mutex;
 
 use brokkr_core::crypto::{Digest, Hasher};
-use brokkr_core::ids::{GrantId, Nonce, OrganId, Timestamp};
+use brokkr_core::ids::{DetectorId, GrantId, Nonce, OrganId, Timestamp};
 use brokkr_core::signal::{PostureEffect, Severity, Signal, SignalClass, SignalScope};
 use brokkr_core::tolerance::{
     DetectorSpec, HostHarmIncident, HostHarmReport, ScreenPass, SelfSet, StormEvent,
@@ -37,11 +39,34 @@ pub enum StormAssessment {
     Unenforceable,
 }
 
+/// The reserved detector id for cross-hop reconciliation (OQGF-M-12). A deviation is one
+/// detection among however many the registered detectors produce, subject to the same
+/// suppression rule (§6.7); giving it an id is what makes it suppressible like any other.
+const RECONCILIATION_DETECTOR: &str = "cross-hop-reconciliation";
+
+/// What one detector concluded about one observation, and what became of it (§6.7). The loop
+/// returns one per firing — **including a suppressed one**, because OQGF-P-4 suppresses a false
+/// *alarm*, not the *evidence* that a detector fired: discarding it would make a tolerance grant
+/// indistinguishable from a detector that was never registered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Detection {
+    pub detector: DetectorId,
+    pub severity: Severity,
+    pub detail: String,
+    /// `Some(grant)` when a live grant suppressed it; `None` when it raised.
+    pub suppressed_by: Option<GrantId>,
+    /// The raise-only Signal — present **only** when not suppressed (OQGF-P-7.4).
+    pub signal: Option<Signal>,
+}
+
 struct HeimdallState {
-    /// Injected evaluation time (never a wall-clock read).
-    now: Timestamp,
-    /// Detectors HEIMDALL has been given, resolved by id during screening.
+    /// Detectors HEIMDALL has been given, resolved by id during screening and run by the loop.
     detectors: Vec<Box<dyn Detector>>,
+    /// Tolerance grants HEIMDALL currently holds (§6.7). `grant_heuristic` validates AND
+    /// **retains**; the loop consults this on every firing. An expired grant is **not** removed
+    /// — it stops being live and stays in the register, because OQGF-P-9.5's standing inventory
+    /// records decisions *taken*, not decisions still in force.
+    grants: Vec<(GrantId, ToleranceGrant)>,
     /// Denominator of the current host-harm window: governed actions evaluated.
     governed: u64,
     /// Numerator of the current window: DAP-confirmed false positives.
@@ -80,7 +105,6 @@ impl Heimdall {
         bound: f64,
         blast_radius: Option<u64>,
         sustained_threshold: u32,
-        now: Timestamp,
     ) -> Self {
         Heimdall {
             corpus,
@@ -90,8 +114,8 @@ impl Heimdall {
             blast_radius,
             sustained_threshold,
             state: Mutex::new(HeimdallState {
-                now,
                 detectors: Vec::new(),
+                grants: Vec::new(),
                 governed: 0,
                 incidents: Vec::new(),
                 over_bound_streak: 0,
@@ -102,11 +126,6 @@ impl Heimdall {
 
     fn state(&self) -> std::sync::MutexGuard<'_, HeimdallState> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
-    }
-
-    /// Inject the current evaluation time (the orchestrator's clock, Phase 11).
-    pub fn set_now(&self, now: Timestamp) {
-        self.state().now = now;
     }
 
     /// Register a detector HEIMDALL may screen and run.
@@ -162,21 +181,84 @@ impl Heimdall {
         }
     }
 
-    /// Cross-hop reconciliation (OQGF-M-12): a `Hop` whose `executed` differs from its
-    /// `authorized` is a deviation and yields a raise-only Signal. `executed: None` is **not**
-    /// a deviation — it is the absence of a comparison (every hop before the executor exists,
-    /// Phase 11). Any non-`Hop` observation yields `None`.
-    pub fn reconcile(&self, observation: &Observation) -> Option<Signal> {
-        match observation {
-            Observation::Hop {
-                authorized,
-                executed: Some(executed),
-            } if executed != authorized => Some(self.raise_signal(
-                SignalClass::ThreatDetected,
+    /// **The evaluation loop — one entry point (§6.7).** Every observation passes through every
+    /// registered detector; a firing is checked against live grants; a suppressed firing is
+    /// recorded (with `suppressed_by`) and raises nothing; an unsuppressed firing carries a
+    /// raise-only Signal (OQGF-P-7). Cross-hop reconciliation (OQGF-M-12) **joins** the loop as
+    /// one more firing subject to the same suppression, not a side path.
+    ///
+    /// `now` arrives with the observation (I-13) and is used only for the grant-liveness expiry
+    /// check — the check OQGF-P-4 exists for, and the one that fails toward *blindness* if it is
+    /// evaluated against a held clock: a grant that never expires silences a detector forever.
+    ///
+    /// **No path here authorizes anything.** [`DetectionVerdict`] has no permitting variant and
+    /// [`PostureEffect`](brokkr_core::signal::PostureEffect) has only `Raise`, so the strongest
+    /// outcome is a raise-only Signal.
+    pub fn observe(&self, o: &Observation, now: Timestamp) -> Vec<Detection> {
+        let st = self.state();
+        let mut out = Vec::new();
+
+        // Every REGISTERED detector observes o (OQGF-I-6). No observation kind is examined by
+        // one path and skipped by the rest.
+        for detector in &st.detectors {
+            if let DetectionVerdict::Fired { severity, detail } = detector.observe(o) {
+                out.push(self.resolve_firing(
+                    &st.grants,
+                    detector.id().clone(),
+                    severity,
+                    detail,
+                    now,
+                ));
+            }
+        }
+
+        // Cross-hop reconciliation joins the loop as one more firing (OQGF-M-12).
+        if let Some(detail) = reconciliation_deviation(o) {
+            out.push(self.resolve_firing(
+                &st.grants,
+                DetectorId::new(RECONCILIATION_DETECTOR),
                 Severity::High,
-                "cross-hop reconciliation deviation (OQGF-M-12)",
-            )),
-            _ => None,
+                detail.to_string(),
+                now,
+            ));
+        }
+
+        out
+    }
+
+    /// Resolve one firing against the retained grants. **Liveness, in §6.7's order (first-failing
+    /// reason):** the grant's signature was checked at issuance; here (2) its scope covers the
+    /// firing detector — its `target` — and (3) `now <= expiry`. A live grant suppresses (the
+    /// firing is recorded, not raised); otherwise the firing raises a Signal.
+    fn resolve_firing(
+        &self,
+        grants: &[(GrantId, ToleranceGrant)],
+        detector: DetectorId,
+        severity: Severity,
+        detail: String,
+        now: Timestamp,
+    ) -> Detection {
+        let live = grants
+            .iter()
+            .find(|(_, g)| g.target == detector && now.0 <= g.expiry.0);
+        match live {
+            Some((grant_id, _)) => Detection {
+                detector,
+                severity,
+                detail,
+                suppressed_by: Some(grant_id.clone()),
+                signal: None,
+            },
+            None => {
+                let signal = self.raise_signal(SignalClass::ThreatDetected, severity, &detail);
+                Detection {
+                    detector,
+                    severity,
+                    detail,
+                    suppressed_by: None,
+                    signal: Some(signal),
+                }
+            }
         }
     }
 
@@ -202,6 +284,19 @@ impl Heimdall {
             signal.signature = sig;
         }
         signal
+    }
+}
+
+/// Cross-hop reconciliation (OQGF-M-12): a `Hop` whose `executed` differs from its `authorized`
+/// is a deviation. `executed: None` is **not** a deviation — it is the absence of a comparison
+/// (every hop before the executor exists, Phase 11). Any non-`Hop` observation is `None`.
+fn reconciliation_deviation(o: &Observation) -> Option<&'static str> {
+    match o {
+        Observation::Hop {
+            authorized,
+            executed: Some(executed),
+        } if executed != authorized => Some("cross-hop reconciliation deviation (OQGF-M-12)"),
+        _ => None,
     }
 }
 
@@ -251,9 +346,14 @@ impl ToleranceController for Heimdall {
     ///   unauthentic grant — one not validly signed by the DAP — carries no authorized scope
     ///   and is refused as `OutOfScope` (fail-closed; see the phase report for the flagged
     ///   naming imprecision).
-    /// - **expiring** — `now > expiry` → `Expired`.
     /// - **scoped** — an empty (blanket) scope is not narrow (OQGF-P-4 "never blanket") →
     ///   `OutOfScope`.
+    ///
+    /// **Expiry is NOT checked here (I-13).** `grant_heuristic` validates and **retains**; the
+    /// `now <= expiry` liveness test is a per-call check in [`observe`](Self::observe), because
+    /// `now` is not available at issuance and checking an expiry against a held clock is exactly
+    /// the defect being removed. An already-expired grant is retained (and recorded, OQGF-P-9.5)
+    /// but never suppresses — the loop finds it not live.
     fn grant_heuristic(&self, grant: ToleranceGrant) -> Result<GrantId, ToleranceError> {
         // Ordered checks, first-failing reason returned (§6.7). Signature first: a grant that
         // is not authentically the DAP's is refused **as forged** (`SignatureInvalid`, Rev 1.12)
@@ -265,10 +365,10 @@ impl ToleranceController for Heimdall {
         if grant.scope.detail.is_empty() {
             return Err(ToleranceError::OutOfScope);
         }
-        if self.state().now.0 > grant.expiry.0 {
-            return Err(ToleranceError::Expired);
-        }
-        Ok(GrantId::new(grant.target.as_str()))
+        // Retain — the loop consults this on every firing (§6.7).
+        let id = GrantId::new(grant.target.as_str());
+        self.state().grants.push((id.clone(), grant));
+        Ok(id)
     }
 
     /// Screen a detector against the Self Set before deployment (OQGF-P-3). The digest check

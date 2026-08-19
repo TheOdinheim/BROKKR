@@ -391,7 +391,7 @@ the sentinel fix is BLOCKED on a core prerequisite; and this risk's closure evid
   and it is **not clean**: six comparisons read a per-call `now` (barrier ×3, genome, intent ×2), and
   **four read a held clock** — `eir.rs:242` (decision expiry, P-8.5), `eir.rs:135–156` (dwell/hold/max
   via `classify`, P-8.3/8.6), `eir.rs:289` (chronic, P-8.6), `heimdall.rs:268` (grant expiry, P-4).
-- **Corrected scope: three crates** (gate ✓, bifrost ✓, sentinel ✗), with sentinel carrying **four**
+- **Corrected scope: three crates** (gate , bifrost , sentinel ), with sentinel carrying **four**
   held-clock-sourced comparison sites across its two engines.
 - **The sentinel fix is BLOCKED.** All four defect sites are **core trait methods**
   (`ResolutionEngine::{may_resolve, resolve, scan_chronic}`, `ToleranceController::grant_heuristic`),
@@ -404,6 +404,44 @@ the sentinel fix is BLOCKED on a core prerequisite; and this risk's closure evid
   PARTIAL for the same reason (`CONF-2026-08-18-P8-REV-R1`).
 - **Neither residual closed.** `likelihood: Possible`, `impact: Major`, `disposition: Reduce`
   unchanged. `plan.status` remains `Open`.
+
+**UPDATE — 18 August 2026 (brokkr-sentinel revision, `reports/PHASE-8-REV-2026-08-18-R2.md`, under
+ARCH Rev 1.16): the sentinel half is corrected; the exhaustive table is CLEAN across three crates;
+the Reduce treatment is EXECUTED. The two residuals are NOT closed.**
+
+- **All three crates now hold no clock.** `brokkr-sentinel` deleted the `now` field and `set_now`
+  from both `EirState` and `HeimdallState`; HEIMDALL's grant-expiry check moved into the new inherent
+  `observe(&self, o, now)` loop; EIR's `may_resolve`/`resolve`/`scan_chronic` became inherent methods
+  taking `now` (the core `ResolutionEngine` trait is frozen — see the report's labeled trait-drop
+  decision). The whole workspace builds and tests green — **159 passed, 0 failed**.
+- **Closure evidence is the exhaustive comparison table, not a grep** (the grep matched shape, not
+  property, and missed the `classify`-fed rows). The table now shows **all 13 expiry/elapsed
+  comparisons reading a per-call `now`** (barrier ×3, genome ×1, sentinel heimdall ×1, sentinel eir
+  ×5). **CLEAN.** Per Task 8 the risk is re-dispositioned only because the table is clean:
+  `plan.status` → **`TreatmentStatus::Executed`** for the held-clock removal. `likelihood: Possible`,
+  `impact: Major`, `disposition: Reduce` unchanged.
+- **Residual 1 (mechanical) — NOT closed.** No signature can prove an implementor forwards `now`
+  rather than storing one; a future gate could reintroduce a held clock. The mitigation is standing:
+  the **exhaustive comparison table SHALL be run and confirmed clean in every conformance pass** —
+  not a pattern grep, which demonstrably could not see two of the five sentinel instances.
+- **Residual 2 (deeper) — NOT closed, and now warrants its own risk.** Three conformance verdicts
+  (SINDRI/BIFRÖST freshness, and the sentinel I-6/P-4 loop) were recorded on evidence that could not
+  have failed — a fixed-`now` test, or a component correct-but-never-called. This is the class Rev
+  1.16 §13 records ("a component can be correct and never be called"), and it is **not** catchable by
+  the table that closes the held-clock instances. **A NEW risk is warranted — recommended for DAP
+  placement as RISK-2026-0007** (below).
+
+**RECOMMENDED NEW ENTRY (for DAP placement) — RISK-2026-0007: A component may be correct,
+documented, and never called; and a conformance verdict may be recorded on a test that could not
+have failed.** Source: ThreatModel (Rev 1.16 §13; disposed instances GAP-2026-08-18-001/-002 and the
+held-clock survivals). Likelihood: Likely (it has recurred — the Phase-8 loop gap and three
+freshness verdicts). Impact: Major (a governance requirement recorded satisfied on nothing).
+Disposition: Reduce — the mitigation is a **discipline, not a structural check**: a conformance
+check enumerating a requirement SHALL identify the end-to-end code path that satisfies it (not the
+types that appear in it), and every negative/structural test SHALL have a demonstrable way to fail.
+Residual (named): the discipline reduces but cannot eliminate the class — no grep or type catches
+"never called"; only asking *what happens end to end* does. Status: Open. This is recommended, not
+placed, because register openings are DAP decisions (the RISK-2026-0006 precedent).
 
 ---
 

@@ -43,5 +43,5 @@ pub mod heimdall;
 pub mod observation;
 
 pub use eir::Eir;
-pub use heimdall::{Heimdall, StormAssessment};
+pub use heimdall::{Detection, Heimdall, StormAssessment};
 pub use observation::{DetectionVerdict, Detector, Observation, SelfSetCorpus};

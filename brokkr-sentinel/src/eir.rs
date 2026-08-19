@@ -17,16 +17,18 @@
 //! independently, and EIR depends on neither (I-5). The response stands down; the intelligence
 //! does not, because EIR never held it.
 //!
-//! `now` is **injected**, never a wall-clock read. `Duration` (nanoseconds) is compared against
-//! `Timestamp` (epoch milliseconds) by widening the millisecond elapsed/held spans to `u128`.
+//! **The current time is not held (I-13):** `may_resolve`, `resolve`, and `scan_chronic` each
+//! take `now` as a parameter of the evaluating call — never a wall-clock read, never stored.
+//! `Duration` (nanoseconds) is compared against `Timestamp` (epoch milliseconds) by widening the
+//! millisecond elapsed/held spans to `u128`.
 
 use std::sync::Mutex;
 
 use brokkr_core::crypto::DualSignature;
 use brokkr_core::ids::{EscalationId, Nonce, Timestamp};
 use brokkr_core::resolution::{
-    ChronicEscalation, EscalationType, ResolutionDecision, ResolutionEngine, ResolutionVerdict,
-    ResolveError, ReturnedToBaseline, resolution_signed_content,
+    ChronicEscalation, EscalationType, ResolutionDecision, ResolutionVerdict, ResolveError,
+    ReturnedToBaseline, resolution_signed_content,
 };
 use brokkr_crypto::DualPublicKey;
 
@@ -51,7 +53,6 @@ struct EscalationState {
 }
 
 struct EirState {
-    now: Timestamp,
     escalations: Vec<EscalationState>,
     /// Nonces already accepted, keyed by `(escalation, nonce)` (OQGF-P-8.5 replay defence).
     ///
@@ -74,11 +75,10 @@ pub struct Eir {
 }
 
 impl Eir {
-    pub fn new(dap_public: PublicBytes, now: Timestamp) -> Self {
+    pub fn new(dap_public: PublicBytes) -> Self {
         Eir {
             dap_public,
             state: Mutex::new(EirState {
-                now,
                 escalations: Vec::new(),
                 accepted_nonces: Vec::new(),
             }),
@@ -87,10 +87,6 @@ impl Eir {
 
     fn state(&self) -> std::sync::MutexGuard<'_, EirState> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
-    }
-
-    pub fn set_now(&self, now: Timestamp) {
-        self.state().now = now;
     }
 
     /// Declare an escalation type and mark it active from `raised_at`. Its
@@ -177,10 +173,16 @@ fn verify_under(key: &PublicBytes, msg: &[u8], sig: &DualSignature) -> bool {
     }
 }
 
-impl ResolutionEngine for Eir {
-    fn may_resolve(&self, escalation: &EscalationId) -> ResolutionVerdict {
+/// The time-dependent operations. **These are inherent methods, not a `ResolutionEngine` trait
+/// impl, and each takes `now` as a parameter of the evaluating call (I-13).** The committed
+/// core `ResolutionEngine` trait carries no `now` and cannot gain one without a core change
+/// that also breaks core's own `MockResolutionEngine` test (out of scope); a held `now` field is
+/// the only alternative, and that is exactly the defect I-13 forbids (RISK-2026-0006). EIR
+/// therefore supersedes the trait with `now`-aware inherent methods. See the revision report.
+impl Eir {
+    /// May this escalation de-escalate, evaluated against the call-site `now` (I-13)?
+    pub fn may_resolve(&self, escalation: &EscalationId, now: Timestamp) -> ResolutionVerdict {
         let st = self.state();
-        let now = st.now;
         match st
             .escalations
             .iter()
@@ -202,16 +204,20 @@ impl ResolutionEngine for Eir {
 
     /// De-escalate — but only on a genuinely DAP-confirmed, fresh, non-replayed decision.
     ///
-    /// **Check order (first-failing reason returned, §6.8):**
+    /// **Check order (first-failing reason returned, §6.8 as reordered in Rev 1.16):**
     /// 1. **Signature** — verified over `brokkr_core::resolution::resolution_signed_content` (the
     ///    *one* encoding the issuer signs and the verifier checks). An unverifiable decision is
     ///    not DAP-confirmed → `NeedsDapConfirmation`. This is first because the other fields of an
     ///    unauthenticated decision — including its `nonce` and `expiry` — are untrustworthy.
-    /// 2. **Replay** — a `(escalation, nonce)` already accepted → `ReplayedNonce`. Checked
-    ///    *before* expiry so a decision that is both replayed and expired names the **attack**
-    ///    (a replayed stand-down) rather than the incidental latency; reporting `Expired` on a
-    ///    replay would be the misdirection Rev 1.13 forbids.
-    /// 3. **Expiry** — `now > expiry` → `Expired` (operational latency, not an attack).
+    /// 2. **Expiry** — `now > expiry` → `Expired`. **Before** replay (Rev 1.16): a decision
+    ///    reaching a replay-first expiry check must carry an unseen nonce, so an
+    ///    expired-and-previously-accepted decision was refused as `ReplayedNonce` and the
+    ///    `Expired` arm became unreachable for the case it exists to catch. Expiry and replay do
+    ///    not overlap in practice (an expiry is a fresh decision arriving late, never a replayed
+    ///    one), so a decision that is somehow both reports `Expired` — too old to act on is too
+    ///    old regardless of how many times it has been seen. `now` is the call parameter (I-13).
+    /// 3. **Replay** — a `(escalation, nonce)` already accepted → `ReplayedNonce` (the attack:
+    ///    an authentic, DAP-confirmed stand-down presented again).
     /// 4. **Something to resolve** — no active escalation with this id → `CriteriaNotMet`.
     /// 5. **Readiness** — a premature stand-down is refused (`HysteresisNotSatisfied` /
     ///    `CriteriaNotMet`); where uncertain the system stays escalated (OQGF-P-8.5). A chronic
@@ -221,7 +227,11 @@ impl ResolutionEngine for Eir {
     /// hysteresis may be re-presented once its hold window elapses; a decision that actually
     /// lowered a defence can never be replayed. Marking the escalation inactive erases no
     /// incident record or detector — EIR holds none (OQGF-P-8.4).
-    fn resolve(&self, d: ResolutionDecision) -> Result<ReturnedToBaseline, ResolveError> {
+    pub fn resolve(
+        &self,
+        d: ResolutionDecision,
+        now: Timestamp,
+    ) -> Result<ReturnedToBaseline, ResolveError> {
         // 1. Authenticity.
         let body = resolution_signed_content(&d);
         if !verify_under(&self.dap_public, &body, &d.signature) {
@@ -229,18 +239,17 @@ impl ResolutionEngine for Eir {
         }
 
         let mut st = self.state();
-        let now = st.now;
 
-        // 2. Replay (attack) before 3. expiry (latency).
+        // 2. Expiry (latency) before 3. replay (attack) — Rev 1.16.
+        if now.0 > d.expiry.0 {
+            return Err(ResolveError::Expired);
+        }
         if st
             .accepted_nonces
             .iter()
             .any(|(e, n)| *e == d.escalation && *n == d.nonce)
         {
             return Err(ResolveError::ReplayedNonce);
-        }
-        if now.0 > d.expiry.0 {
-            return Err(ResolveError::Expired);
         }
 
         // 4. Something to resolve.
@@ -279,9 +288,8 @@ impl ResolutionEngine for Eir {
     /// finding IS host harm: it surfaces here as a value, and the orchestrator (Phase 11)
     /// raises it through the graded-response path (a raise-only Signal) and records it — EIR
     /// produces the finding; it does not emit or record (out of scope this phase).
-    fn scan_chronic(&self) -> Vec<ChronicEscalation> {
+    pub fn scan_chronic(&self, now: Timestamp) -> Vec<ChronicEscalation> {
         let st = self.state();
-        let now = st.now;
         st.escalations
             .iter()
             .filter(|e| e.active)
