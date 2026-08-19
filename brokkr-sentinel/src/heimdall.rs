@@ -15,8 +15,8 @@ use brokkr_core::crypto::{Digest, Hasher};
 use brokkr_core::ids::{DetectorId, GrantId, Nonce, OrganId, Timestamp};
 use brokkr_core::signal::{PostureEffect, Severity, Signal, SignalClass, SignalScope};
 use brokkr_core::tolerance::{
-    DetectorSpec, HostHarmIncident, HostHarmReport, ScreenPass, SelfSet, StormEvent,
-    ToleranceController, ToleranceError, ToleranceGrant,
+    DetectorSpec, HostHarmIncident, HostHarmReport, ResponseClass, ScreenPass, SelfSet, StormEvent,
+    ToleranceError, ToleranceGrant,
 };
 use brokkr_crypto::{DualKeyPair, DualPublicKey, Sha384Hasher};
 
@@ -335,11 +335,40 @@ fn verify_under(key: &PublicBytes, msg: &[u8], sig: &brokkr_core::crypto::DualSi
     }
 }
 
-impl ToleranceController for Heimdall {
+/// The tolerance-controller operations. **These are inherent methods, not a
+/// `ToleranceController` trait impl, and [`screen`](Self::screen) takes `now` as a parameter of
+/// the evaluating call (I-13).** Rev 1.17 §6.12 added `produced_at` to `ScreenPass`: a
+/// successful screen must record the time it was produced, and the committed core
+/// `ToleranceController::screen` carries no `now` to supply it. That trait cannot gain a `now`
+/// without a core change that also breaks core's own `MockController` test (out of scope), and
+/// the only other source for the time — a held `now` field — is exactly the defect I-13 forbids
+/// and the sentinel just removed. Because a trait cannot be partially implemented, `screen`'s
+/// need for `now` supersedes the whole impl with `now`-aware inherent methods — the same move
+/// EIR made for `ResolutionEngine`. The I-4 Deterministic refusal, previously inherited from
+/// core's provided `grant`, is preserved verbatim as the inherent [`grant`](Self::grant) below;
+/// core's trait and its I-4 negative test are untouched. See the revision report.
+impl Heimdall {
+    /// Attach a tolerance grant. **Refuses a `Deterministic` target** with
+    /// [`ToleranceError::NonSuppressibleGate`] — an error, never a silent no-op (I-4 /
+    /// OQGF-P-2). This mirrors core's sealed provided `grant`; a `Heuristic` target routes to
+    /// [`grant_heuristic`](Self::grant_heuristic). HEIMDALL no longer *inherits* this refusal
+    /// from the core trait (it is not a `ToleranceController` — see the impl doc above), so the
+    /// refusal lives here explicitly and the sentinel's I-4 test exercises this method directly.
+    pub fn grant(
+        &self,
+        grant: ToleranceGrant,
+        class: ResponseClass,
+    ) -> Result<GrantId, ToleranceError> {
+        match class {
+            ResponseClass::Deterministic => Err(ToleranceError::NonSuppressibleGate),
+            ResponseClass::Heuristic => self.grant_heuristic(grant),
+        }
+    }
+
     /// Attach a grant to a heuristic detector (OQGF-P-4). Reached **only** for a `Heuristic`
-    /// target: the sole route here is core's provided [`ToleranceController::grant`], which is
-    /// NOT overridden and refuses a `Deterministic` target with `NonSuppressibleGate` before
-    /// this method is called (OQGF-P-2). A grant SHALL be signed, scoped, and expiring:
+    /// target: the sole route here is the inherent [`grant`](Self::grant) above, which refuses
+    /// a `Deterministic` target with `NonSuppressibleGate` before this method is called
+    /// (OQGF-P-2). A grant SHALL be signed, scoped, and expiring:
     ///
     /// - **signed** — the dual-family signature over the grant's signed content is verified
     ///   under the declared DAP key. `ToleranceError` has no signature-failure variant, so an
@@ -381,10 +410,18 @@ impl ToleranceController for Heimdall {
     ///    contain nothing the detector fires on).
     /// 3. The detector runs over every observation. A **single** firing fails: the Self Set
     ///    is by declaration legitimate activity, so one hit is a demonstrated false positive.
-    fn screen(
+    ///
+    /// On success the returned [`ScreenPass`] records the `SelfSet` **version** it screened
+    /// against (`self_set.version`, already matched against the corpus at step 1 — not a
+    /// default or a copy of something else) and the per-call **`now`** it was produced at
+    /// (I-13, §6.12). Version equality — not recency — is the gate Phase-9 Gate 3 applies to
+    /// the pass; `now` is the audit trail, taken as a parameter of this evaluating call and
+    /// never held.
+    pub fn screen(
         &self,
         detector: &DetectorSpec,
         self_set: &SelfSet,
+        now: Timestamp,
     ) -> Result<ScreenPass, ToleranceError> {
         if self.corpus.version() != self_set.version {
             return Err(ToleranceError::FailsCentralTolerance);
@@ -405,6 +442,7 @@ impl ToleranceController for Heimdall {
         }
         Ok(ScreenPass {
             version: self_set.version.clone(),
+            produced_at: now,
         })
     }
 
@@ -412,7 +450,7 @@ impl ToleranceController for Heimdall {
     /// counts only confirmed false positives (§13). `autoimmunity` is a **sustained** breach:
     /// the over-bound streak has reached the DAP-declared threshold (not a single sample,
     /// P-5a). `storm` carries the most recent assessed storm.
-    fn host_harm(&self) -> HostHarmReport {
+    pub fn host_harm(&self) -> HostHarmReport {
         let st = self.state();
         HostHarmReport {
             rate: window_rate(st.governed, st.incidents.len() as u64),

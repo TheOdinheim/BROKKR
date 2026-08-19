@@ -20,8 +20,7 @@ use brokkr_core::resolution::{
 };
 use brokkr_core::signal::PostureEffect;
 use brokkr_core::tolerance::{
-    DetectorSpec, ResponseClass, SelfSet, SuppressionScope, ToleranceController, ToleranceError,
-    ToleranceGrant,
+    DetectorSpec, ResponseClass, SelfSet, SuppressionScope, ToleranceError, ToleranceGrant,
 };
 use brokkr_crypto::{DualKeyPair, Sha384Hasher};
 
@@ -410,6 +409,7 @@ fn test_oqgf_p_3_single_firing_fails_screening() {
             id: DetectorId::new("d"),
         },
         &matching_selfset(&obs),
+        Timestamp(1_000),
     );
     assert_eq!(r, Err(ToleranceError::FailsCentralTolerance));
 }
@@ -425,8 +425,38 @@ fn test_screening_passes_when_detector_clears() {
             id: DetectorId::new("d"),
         },
         &matching_selfset(&obs),
+        Timestamp(1_000),
     );
     assert!(r.is_ok());
+}
+
+#[test]
+fn test_oqgf_p_6_3_i13_screen_pass_carries_screened_version_and_call_site_now() {
+    // Phase-9 Gate 3 (OQGF-P-6.3) will check a ScreenPass by the Self Set version it screened
+    // against; I-13 requires the produced-at time to be the per-call `now`, never a held clock.
+    // A pass recording the wrong version, or a default/held time, would let a stale screening
+    // activate a detector — which is the failure this small property exists to foreclose.
+    let dap_kp = DualKeyPair::generate().unwrap();
+    let obs = corpus_obs();
+    let h = heimdall_with(obs.clone(), &dap_kp, 0.1, Some(10), 2);
+    h.register_detector(Box::new(AlwaysClear(DetectorId::new("d"))));
+    let selfset = matching_selfset(&obs);
+
+    let pass = h
+        .screen(
+            &DetectorSpec {
+                id: DetectorId::new("d"),
+            },
+            &selfset,
+            Timestamp(4242),
+        )
+        .expect("a clearing detector passes screening");
+
+    // The version is the Self Set actually screened against — not a default or a copy.
+    assert_eq!(pass.version, selfset.version);
+    assert_eq!(pass.version, SelfSetVersion::new("v1"));
+    // produced_at is exactly the `now` handed to this evaluating call (I-13) — never held.
+    assert_eq!(pass.produced_at, Timestamp(4242));
 }
 
 #[test]
@@ -449,6 +479,7 @@ fn test_oqgf_p_3_substituted_corpus_is_refused() {
             id: DetectorId::new("d"),
         },
         &declared,
+        Timestamp(1_000),
     );
     assert_eq!(r, Err(ToleranceError::FailsCentralTolerance));
     // NOTHING was run — the digest check fails before any observation reaches the detector.
