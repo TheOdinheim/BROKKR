@@ -21,13 +21,15 @@ use brokkr_core::crypto::{
     Attestation, Digest, DualSignature, HashAlg, Hasher, Signature, SignatureAlg,
 };
 use brokkr_core::gate::{Action, AnergyReason, AuthorizationDecision, CostimulationGate};
+use brokkr_core::genome::PrivilegeClass;
 use brokkr_core::ids::{Dap, Nonce, SubjectId, Timestamp, ToolId};
 use brokkr_core::intent::{
     Capability, IntentProvenanceChain, IntentScope, Invariant, InvariantSet,
 };
 use brokkr_crypto::{DualKeyPair, Sha384Hasher};
-use brokkr_gate::{RegistryResolver, Sindri};
+use brokkr_gate::{GenomeResolver, RegistryResolver, ResolvedInvariant, ResolvedTool, Sindri};
 use brokkr_intent::{Skuld, canonical};
+use std::collections::HashMap;
 
 // ---- helpers -------------------------------------------------------------------------
 
@@ -152,13 +154,97 @@ fn assert_anergy(decision: AuthorizationDecision, expected: AnergyReason) {
     }
 }
 
+// ---- genome-resolver test doubles (conjuncts 3 and 4) --------------------------------
+
+/// Resolves everything permissively: every tool needs no capability and carries no privilege,
+/// every invariant forbids nothing. Used to update the Signal-1/Signal-2 tests for the new
+/// constructor without letting conjuncts 3/4 change their verdicts — those tests still assert
+/// exactly what they asserted before.
+struct PermissiveGenome;
+impl GenomeResolver for PermissiveGenome {
+    fn resolve_tool(&self, _tool: &ToolId) -> Option<ResolvedTool> {
+        Some(ResolvedTool {
+            required_capabilities: vec![],
+            privilege: PrivilegeClass::Unprivileged,
+        })
+    }
+    fn resolve_invariant(&self, _invariant: &Invariant) -> Option<ResolvedInvariant> {
+        Some(ResolvedInvariant {
+            forbids_capabilities: vec![],
+            forbids_privilege: vec![],
+        })
+    }
+}
+
+/// A controlled genome: returns exactly the tools and invariants declared, `None` for anything
+/// unknown (an undeclared tool or an invariant with no predicate). This is the test double; it
+/// is not the production resolver.
+#[derive(Default)]
+struct MockGenome {
+    tools: HashMap<ToolId, ResolvedTool>,
+    invariants: HashMap<Invariant, ResolvedInvariant>,
+}
+impl MockGenome {
+    fn with_tool(mut self, tool: &str, caps: &[&str], privilege: PrivilegeClass) -> Self {
+        self.tools.insert(
+            ToolId::new(tool),
+            ResolvedTool {
+                required_capabilities: caps.iter().map(|c| Capability::new(*c)).collect(),
+                privilege,
+            },
+        );
+        self
+    }
+    fn with_invariant(
+        mut self,
+        invariant: &str,
+        forbids_caps: &[&str],
+        forbids_priv: &[PrivilegeClass],
+    ) -> Self {
+        self.invariants.insert(
+            Invariant::new(invariant),
+            ResolvedInvariant {
+                forbids_capabilities: forbids_caps.iter().map(|c| Capability::new(*c)).collect(),
+                forbids_privilege: forbids_priv.to_vec(),
+            },
+        );
+        self
+    }
+}
+impl GenomeResolver for MockGenome {
+    fn resolve_tool(&self, tool: &ToolId) -> Option<ResolvedTool> {
+        self.tools.get(tool).cloned()
+    }
+    fn resolve_invariant(&self, invariant: &Invariant) -> Option<ResolvedInvariant> {
+        self.invariants.get(invariant).cloned()
+    }
+}
+
+/// A signed root-only chain with an exact current scope and invariant set — the smallest chain
+/// that passes Signals 1 and 2 (the identity binds to `principal`) while letting each conjunct-3/4
+/// test control precisely what the gate checks.
+fn root_chain(principal: &Party, caps: &[&str], invariants: &[&str]) -> IntentProvenanceChain {
+    let root = Skuld
+        .sign_root(
+            principal.subject.clone(),
+            Dap::new("Jeremy Rose", "dap-1"),
+            scope(caps),
+            invs(invariants),
+            Nonce(1),
+            Timestamp(10_000),
+            &principal.kp,
+        )
+        .unwrap();
+    IntentProvenanceChain::new(root)
+}
+
 // ---- positive ------------------------------------------------------------------------
 
 #[test]
 fn test_oqgf_m_11_valid_costimulation_grants() {
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // Signal 1 identity is the final hop (hop-2), which binds to the chain's last entry.
     let identity = attn(&hop2.subject);
@@ -192,7 +278,10 @@ fn test_root_only_chain_binds_to_principal() {
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root); // no entries
-    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal));
+    let sindri = Sindri::new(
+        declare(RegistryResolver::new(), &principal),
+        PermissiveGenome,
+    );
 
     // Root-only chain: identity binds to root.principal.
     match sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)) {
@@ -209,7 +298,7 @@ fn test_root_only_chain_binds_to_principal() {
 fn test_oqgf_m_11_undeclared_identity_is_anergy() {
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // A subject the registry does not declare: resolution returns None.
     assert_anergy(
@@ -231,7 +320,7 @@ fn test_oqgf_m_11_identity_does_not_bind_is_anergy() {
     // does not satisfy Signal 1.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // hop-1: declared, resolves, but not the final hop the chain proves.
     assert_anergy(
@@ -257,7 +346,7 @@ fn test_root_only_chain_wrong_principal_is_anergy() {
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
     let reg = declare(declare(RegistryResolver::new(), &principal), &other);
-    let sindri = Sindri::new(reg);
+    let sindri = Sindri::new(reg, PermissiveGenome);
 
     // `other` is declared (resolves) but != root.principal → binding fails.
     assert_anergy(
@@ -282,7 +371,7 @@ fn test_oqgf_m_14_i13_expiry_is_evaluated_against_call_time_not_a_held_clock() {
     // clock precisely because it agreed with it.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2); // expiry 10_000
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
     let identity = attn(&hop2.subject);
 
     // now (500) < expiry (10_000): fresh -> Granted.
@@ -345,7 +434,7 @@ fn test_tampered_entry_signature_is_anergy() {
         )
         .unwrap();
 
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
     assert_anergy(
         sindri.authorize(&attn(&hop2.subject), &tampered, action(), Timestamp(500)),
         AnergyReason::ChainInvalid,
@@ -396,7 +485,7 @@ fn test_broken_hash_link_is_anergy() {
         )
         .unwrap();
 
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
     assert_anergy(
         sindri.authorize(&attn(&hop2.subject), &broken, action(), Timestamp(500)),
         AnergyReason::ChainInvalid,
@@ -411,7 +500,7 @@ fn test_unresolvable_hop_is_anergy() {
     let chain = signed_2hop(&principal, &hop1, &hop2);
     // Declare principal and hop-2, but NOT hop-1.
     let reg = declare(declare(RegistryResolver::new(), &principal), &hop2);
-    let sindri = Sindri::new(reg);
+    let sindri = Sindri::new(reg, PermissiveGenome);
 
     assert_anergy(
         sindri.authorize(&attn(&hop2.subject), &chain, action(), Timestamp(500)),
@@ -429,7 +518,7 @@ fn test_i1_sindri_never_mints() {
     // rather than a grant.
     let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let chain = signed_2hop(&principal, &hop1, &hop2);
-    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2));
+    let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     let decision = sindri.authorize(
         &attn(&SubjectId::new("nobody")),
@@ -440,5 +529,144 @@ fn test_i1_sindri_never_mints() {
     assert!(
         matches!(decision, AuthorizationDecision::Anergy { .. }),
         "a failing evaluate must yield Anergy, never a minted grant"
+    );
+}
+
+// ---- conjunct 3: action in scope -----------------------------------------------------
+
+#[test]
+fn tool_not_in_genome_yields_out_of_scope() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &[]);
+    // Empty genome: resolve_tool("write") returns None — an undeclared tool is denied.
+    let sindri = Sindri::new(
+        declare(RegistryResolver::new(), &principal),
+        MockGenome::default(),
+    );
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::OutOfScope,
+    );
+}
+
+#[test]
+fn tool_capability_missing_from_scope() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &[]);
+    // Tool "write" requires the "write" capability; the chain's scope is {read}.
+    let genome = MockGenome::default().with_tool("write", &["write"], PrivilegeClass::Unprivileged);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::OutOfScope,
+    );
+}
+
+#[test]
+fn tool_all_capabilities_in_scope_no_invariants() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read", "write"], &[]);
+    // Tool requires "read" ⊆ {read, write}; no invariants → full grant.
+    let genome = MockGenome::default().with_tool("write", &["read"], PrivilegeClass::Unprivileged);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    match sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)) {
+        AuthorizationDecision::Granted(_) => {}
+        AuthorizationDecision::Anergy { reason } => {
+            panic!("expected Granted, got Anergy {{ {reason:?} }}")
+        }
+    }
+}
+
+// ---- conjunct 4: action respects invariants ------------------------------------------
+
+#[test]
+fn invariant_with_no_predicate_yields_violated() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &["x"]);
+    // The tool passes conjunct 3, but invariant "x" has no declared predicate → denied.
+    let genome = MockGenome::default().with_tool("write", &[], PrivilegeClass::Unprivileged);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::InvariantViolated,
+    );
+}
+
+#[test]
+fn tool_requires_forbidden_capability() {
+    let principal = party("principal");
+    // "network" is in scope so conjunct 3 passes and we reach conjunct 4.
+    let chain = root_chain(&principal, &["network"], &["no-network"]);
+    let genome = MockGenome::default()
+        .with_tool("write", &["network"], PrivilegeClass::Unprivileged)
+        .with_invariant("no-network", &["network"], &[]);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::InvariantViolated,
+    );
+}
+
+#[test]
+fn tool_has_forbidden_privilege() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &["no-privileged"]);
+    let genome = MockGenome::default()
+        .with_tool("write", &[], PrivilegeClass::Privileged)
+        .with_invariant("no-privileged", &[], &[PrivilegeClass::Privileged]);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::InvariantViolated,
+    );
+}
+
+#[test]
+fn tool_passes_all_invariants() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &["no-network"]);
+    let genome = MockGenome::default()
+        .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
+        .with_invariant("no-network", &["network"], &[]);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    match sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)) {
+        AuthorizationDecision::Granted(_) => {}
+        AuthorizationDecision::Anergy { reason } => {
+            panic!("expected Granted, got Anergy {{ {reason:?} }}")
+        }
+    }
+}
+
+#[test]
+fn multiple_invariants_all_pass() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &["no-network", "no-exec-outside"]);
+    let genome = MockGenome::default()
+        .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
+        .with_invariant("no-network", &["network"], &[])
+        .with_invariant("no-exec-outside", &["exec-root"], &[]);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    match sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)) {
+        AuthorizationDecision::Granted(_) => {}
+        AuthorizationDecision::Anergy { reason } => {
+            panic!("expected Granted, got Anergy {{ {reason:?} }}")
+        }
+    }
+}
+
+#[test]
+fn multiple_invariants_second_fails() {
+    let principal = party("principal");
+    let chain = root_chain(&principal, &["read"], &["no-network", "no-read"]);
+    let genome = MockGenome::default()
+        .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
+        // Passes: the tool needs "read", not "network".
+        .with_invariant("no-network", &["network"], &[])
+        // Fails: the tool needs "read".
+        .with_invariant("no-read", &["read"], &[]);
+    let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
+    assert_anergy(
+        sindri.authorize(&attn(&principal.subject), &chain, action(), Timestamp(500)),
+        AnergyReason::InvariantViolated,
     );
 }

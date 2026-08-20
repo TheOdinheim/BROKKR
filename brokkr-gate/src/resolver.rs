@@ -9,7 +9,9 @@
 //! same trait, and swapping them changes no SINDRI code.
 
 use brokkr_core::crypto::Attestation;
-use brokkr_core::ids::SubjectId;
+use brokkr_core::genome::PrivilegeClass;
+use brokkr_core::ids::{SubjectId, ToolId};
+use brokkr_core::intent::{Capability, Invariant};
 use brokkr_crypto::DualPublicKey;
 use std::collections::BTreeMap;
 
@@ -96,4 +98,34 @@ impl KeyResolver for RegistryResolver {
         // design — the caller (SINDRI) maps `None` to architectural anergy.
         DualPublicKey::from_public_bytes(ml_dsa_public, slh_dsa_public).ok()
     }
+}
+
+/// The data SINDRI needs from a resolved tool — a projection, not the full tool entry. The gate
+/// evaluates exactly these fields and reads nothing else the genome holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTool {
+    pub required_capabilities: Vec<Capability>,
+    pub privilege: PrivilegeClass,
+}
+
+/// The data SINDRI needs from a resolved invariant — a projection, not the full invariant entry.
+/// The gate evaluates exactly these fields and reads nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedInvariant {
+    pub forbids_capabilities: Vec<Capability>,
+    pub forbids_privilege: Vec<PrivilegeClass>,
+}
+
+/// Resolves the genome data the action-in-scope and action-respects-invariants checks need. The
+/// same seam pattern as [`KeyResolver`]: the gate asks, the resolver answers, and the gate does
+/// not know where the data lives. Backed by the genome in production; a test double serves the
+/// gate's own tests.
+pub trait GenomeResolver: Send + Sync {
+    /// Resolve a tool by id. `None` means the tool is not in the genome — an undeclared tool is a
+    /// denied tool; the register is the closed vocabulary.
+    fn resolve_tool(&self, tool: &ToolId) -> Option<ResolvedTool>;
+
+    /// Resolve an invariant's predicate. `None` means the invariant has no declared evaluation
+    /// predicate; an unresolvable invariant is denied, not passed (fail-closed).
+    fn resolve_invariant(&self, invariant: &Invariant) -> Option<ResolvedInvariant>;
 }

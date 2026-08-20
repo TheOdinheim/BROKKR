@@ -7,21 +7,27 @@
 //! minter, and `mint` is private to that module. The worst a buggy or compromised SINDRI
 //! can do is **wrongly deny** (I-1, fail-safe by construction).
 //!
-//! ## What Phase 4 enforces
+//! ## What SINDRI enforces
 //!
-//! OQGF-M-11 requires four conjuncts for a grant. Per Rev 1.3, Phase 4 enforces the two
-//! cryptographic ones and defers the two action-semantics ones:
+//! A grant requires four conjuncts, all evaluated by [`Sindri`]'s `evaluate`:
 //!
-//! 1. **Signal 1 — identity** (OQGF-M-1): the presented identity resolves to a declared
-//!    root of trust **and** binds to the hop the chain's signature actually proves.
-//! 2. **Signal 2 — chain** (OQGF-M-8/M-9/M-14): a valid Intent Provenance Chain, verified
-//!    against resolver-supplied public roots of trust via
+//! 1. **Signal 1 — identity**: the presented identity resolves to a declared root of trust
+//!    **and** binds to the hop the chain's signature actually proves.
+//! 2. **Signal 2 — chain**: a valid Intent Provenance Chain, verified against
+//!    resolver-supplied public roots of trust via
 //!    [`brokkr_intent::Skuld::verify_chain_public`].
-//! 3. **Action-in-scope** and 4. **action-respects-invariants** are **DEFERRED** under the
-//!    Deferred-Conjunct Deadline (Rev 1.3 §6.4): they SHALL be enforced before the executor
-//!    is wired at Phase 11. SINDRI builds nothing for them, and by construction
-//!    [`AnergyReason::OutOfScope`] and [`AnergyReason::InvariantViolated`] are unreachable
-//!    from [`Sindri`]'s `evaluate` at Phase 4.
+//! 3. **Action in scope**: the action's tool resolves in the genome (through the
+//!    [`GenomeResolver`] seam) and every capability it requires is present in the chain's
+//!    current attenuated scope. An undeclared tool, or a required capability missing from
+//!    scope, is [`AnergyReason::OutOfScope`].
+//! 4. **Action respects invariants**: for each accumulated invariant, the tool requires no
+//!    capability the invariant forbids and carries no privilege class it forbids. An
+//!    invariant with no declared predicate is denied, not passed. Either is
+//!    [`AnergyReason::InvariantViolated`].
+//!
+//! Conjuncts 3 and 4 use the same resolver-seam pattern as Signal 2's key resolver: the gate
+//! asks the [`GenomeResolver`], the resolver answers, and the gate does not know where the data
+//! lives (the genome, in production).
 //!
 //! ## Scope and posture
 //!
@@ -51,5 +57,7 @@
 pub mod resolver;
 pub mod sindri;
 
-pub use resolver::{KeyResolver, RegistryResolver};
+pub use resolver::{
+    GenomeResolver, KeyResolver, RegistryResolver, ResolvedInvariant, ResolvedTool,
+};
 pub use sindri::Sindri;

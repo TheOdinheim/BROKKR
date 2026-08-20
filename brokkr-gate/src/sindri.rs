@@ -5,7 +5,7 @@
 //! module-private `mint` SINDRI cannot reach. This is I-1 at its strongest point: the
 //! worst SINDRI can do is wrongly deny.
 
-use crate::resolver::KeyResolver;
+use crate::resolver::{GenomeResolver, KeyResolver};
 use brokkr_core::crypto::Attestation;
 use brokkr_core::gate::{Action, AnergyReason, CostimulationGate};
 use brokkr_core::ids::Timestamp;
@@ -13,12 +13,13 @@ use brokkr_core::intent::{AttenuationError, IntentProvenanceChain};
 use brokkr_crypto::DualPublicKey;
 use brokkr_intent::{IntentError, Skuld};
 
-/// The costimulation gate. Generic over the key-resolution seam ([`KeyResolver`]) so it
-/// does not know whether a key came from a declared registry (Option B) or a certified
-/// attestation (Option A) — that ignorance is deliberate (§6.4.1). Generic rather than
-/// boxed: the resolver type is fixed at construction and dispatch is static (zero-cost);
-/// no heterogeneous resolvers are needed at runtime, so `dyn` indirection would buy
-/// nothing.
+/// The costimulation gate. Generic over two resolution seams — the key resolver
+/// ([`KeyResolver`], for Signal 2) and the genome resolver ([`GenomeResolver`], for the
+/// action-in-scope and action-respects-invariants conjuncts) — so it does not know where
+/// either kind of data came from; that ignorance is deliberate and is the migration path.
+/// Generic rather than boxed: the resolver types are fixed at construction and dispatch is
+/// static (zero-cost); no heterogeneous resolvers are needed at runtime, so `dyn` indirection
+/// would buy nothing.
 ///
 /// ## `now` arrives per call, and is never held (I-13)
 ///
@@ -32,15 +33,20 @@ use brokkr_intent::{IntentError, Skuld};
 /// **The resolver is configuration and is fixed at construction; the time is not.** SINDRI
 /// never reads a wall clock — the Phase-11 orchestrator supplies the current time at each
 /// call.
-pub struct Sindri<R: KeyResolver> {
+pub struct Sindri<R: KeyResolver, G: GenomeResolver> {
     resolver: R,
+    genome_resolver: G,
 }
 
-impl<R: KeyResolver> Sindri<R> {
-    /// Construct a gate over a key-resolution seam. The resolver is configuration and is
-    /// fixed here; the evaluation time is **not** held — it arrives per call (I-13).
-    pub fn new(resolver: R) -> Self {
-        Self { resolver }
+impl<R: KeyResolver, G: GenomeResolver> Sindri<R, G> {
+    /// Construct a gate over the key-resolution and genome-resolution seams. Both resolvers are
+    /// configuration and are fixed here; the evaluation time is **not** held — it arrives per
+    /// call (I-13).
+    pub fn new(resolver: R, genome_resolver: G) -> Self {
+        Self {
+            resolver,
+            genome_resolver,
+        }
     }
 
     /// Signal 1 — identity (OQGF-M-1), per Rev 1.3 §6.4. Two requirements, either failure
@@ -130,33 +136,65 @@ fn map_intent_error(e: IntentError) -> AnergyReason {
         // `Backend` is produced by SKULD only while *signing*, never by
         // `verify_chain_public`, so this arm is unreachable in practice. It is mapped
         // fail-closed to `ChainInvalid` anyway: an unexpected verifier error denies, never
-        // grants. (Deferred conjuncts 3-4 own `OutOfScope`/`InvariantViolated`; this arm
-        // must never reach for either.)
+        // grants. (Conjuncts 3-4 own `OutOfScope`/`InvariantViolated`; this arm produces
+        // neither.)
         IntentError::Backend => AnergyReason::ChainInvalid,
     }
 }
 
-impl<R: KeyResolver> CostimulationGate for Sindri<R> {
+impl<R: KeyResolver, G: GenomeResolver> CostimulationGate for Sindri<R, G> {
     /// The verdict. `Ok(())` grants (the provided `authorize` mints); `Err(reason)` yields
-    /// architectural anergy. Signals 1 and 2 are enforced here (Rev 1.3 Phase-4 scope).
-    ///
-    /// `_action` is unused at Phase 4: conjuncts 3 (action-in-scope) and 4
-    /// (action-respects-invariants) are **DEFERRED** under the Deferred-Conjunct Deadline
-    /// (Rev 1.3 §6.4). They SHALL be enforced by SINDRI before the executor is wired at
-    /// Phase 11, once REGIN (Phase 5) supplies the action-to-capability binding and the
-    /// invariant-evaluator seam. Building nothing for them here is why
-    /// [`AnergyReason::OutOfScope`] and [`AnergyReason::InvariantViolated`] are unreachable
-    /// from this method by construction — no code path below constructs either.
+    /// architectural anergy. All four conjuncts are enforced here, in order: Signal 1, Signal 2,
+    /// action-in-scope, action-respects-invariants.
     fn evaluate(
         &self,
         identity: &Attestation,
         chain: &IntentProvenanceChain,
-        _action: &Action,
+        action: &Action,
         now: Timestamp,
     ) -> Result<(), AnergyReason> {
         self.signal_1(identity, chain)?;
         self.signal_2(chain, now)?;
-        // Conjuncts 3 and 4 land here, before Phase 11 (Deferred-Conjunct Deadline, §6.4).
+
+        // Conjunct 3 — action in scope. The tool must resolve in the genome, and every
+        // capability it requires must be present in the chain's current attenuated scope. An
+        // undeclared tool is a denied tool: the register is the closed vocabulary. An empty
+        // requirement set is vacuously satisfied — a tool that needs no capability needs no scope.
+        let resolved_tool = self
+            .genome_resolver
+            .resolve_tool(&action.tool)
+            .ok_or(AnergyReason::OutOfScope)?;
+        let scope = chain.current_scope();
+        for cap in &resolved_tool.required_capabilities {
+            if !scope.capabilities().contains(cap) {
+                return Err(AnergyReason::OutOfScope);
+            }
+        }
+
+        // Conjunct 4 — action respects invariants. For each accumulated invariant, resolve its
+        // predicate and check the tool against it. An invariant with no declared predicate is
+        // denied, not passed (the fail-closed backstop). No invariants means nothing to violate.
+        let invariants = chain.current_invariants();
+        for inv in invariants.iter() {
+            let predicate = self
+                .genome_resolver
+                .resolve_invariant(inv)
+                .ok_or(AnergyReason::InvariantViolated)?;
+            // Does the tool require any capability this invariant forbids?
+            for forbidden in &predicate.forbids_capabilities {
+                if resolved_tool.required_capabilities.contains(forbidden) {
+                    return Err(AnergyReason::InvariantViolated);
+                }
+            }
+            // Does the tool carry a privilege class this invariant forbids?
+            if predicate
+                .forbids_privilege
+                .contains(&resolved_tool.privilege)
+            {
+                return Err(AnergyReason::InvariantViolated);
+            }
+        }
+
         Ok(())
     }
 }
