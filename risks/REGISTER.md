@@ -239,7 +239,7 @@ RISK-2026-0005.
 | **disposition** | `Disposition::Reduce` |
 | **plan.owner** | Jeremy Rose |
 | **plan.target** | **Phase 5 (REGIN)** — an action-to-capability binding (a `required: Capability` field on `Action`, or a REGIN-owned `required_capability(&Action) -> Capability` consumed through a trait SINDRI does not implement) **and** an invariant-evaluator seam (`(&Action, &Invariant) -> bool` reached through an interface). A **hard gate before Phase 11** (the executor SHALL NOT be wired to a gate lacking both). Landing may be Phase 5 or a scoped SINDRI revision immediately after. |
-| **plan.status** | `TreatmentStatus::Open` (types placed 27 Jul 2026, Rev 1.4 core revision — **enforcement still pending Phase 5**; see UPDATE below. NOT Executed: the treatment is the enforcement, not the type.) |
+| **plan.status** | `TreatmentStatus::Executed` (closed 20 Aug 2026 — conjuncts 3+4 enforced in SINDRI at `884958f`, executor wired at Phase 11 `a7046fa`) |
 | **mitigation** | Land both seams (above); then extend SINDRI's `evaluate` to compute conjunct 3 (`required_capability(action) ∈ current_scope()` else `OutOfScope`) and conjunct 4 (invariant evaluator over `current_invariants()` else `InvariantViolated`). Enforce the Deferred-Conjunct Deadline as a precondition on wiring the executor at Phase 11. |
 | **residual (required by type)** | After both land: SINDRI evaluates all four conjuncts. Residual = the **correctness of the capability vocabulary and invariant semantics REGIN defines** — a governance/vocabulary judgment (does the tool→capability mapping and the invariant-evaluation predicate capture the intended authority?), re-assessed when the REGIN seams are specified. Residual `likelihood: Unlikely`, `impact: Major`, re-dispositioned at the Phase-5 seam. |
 
@@ -270,6 +270,20 @@ the labeled option was selected knowingly), stated all four conjuncts in full, r
 bounded the deferral with the Deferred-Conjunct Deadline. ARCH Rev 1.4 then placed the type
 surface (this UPDATE); Phase 5 lands the enforcement. This entry tracks the residual that
 deadline governs.
+
+**UPDATE — 20 August 2026 (CLOSED).** Both conditions of the Deferred-Conjunct Deadline are met:
+
+- **Conjuncts 3 and 4 enforced** — `884958f` (brokkr-gate revision). `GenomeResolver` seam added;
+  SINDRI's `evaluate` now checks action-in-scope (conjunct 3, `OutOfScope`) and
+  action-respects-invariants (conjunct 4, `InvariantViolated`). M-11 and M-10 moved PARTIAL →
+  satisfied for declarative invariants (CONF-2026-08-20-P4-REV-R2.md).
+- **Executor wired** — `a7046fa` (Phase 11, brokkr-cli). The governed action cycle runs end to end;
+  `execute_hop` calls `gate.authorize` with all four conjuncts enforced.
+
+**Disposition: `Closed`.** `plan.status: Executed`. The detail-level-invariant residual (invariants
+requiring interpretation of `Action.detail`) is unchanged, recorded in ARCH §13 and
+CONF-2026-08-20-P4-REV-R2.md — it is a named limitation of the declarative predicate surface,
+not an open risk item.
 
 ---
 
