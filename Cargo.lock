@@ -37,6 +37,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "brokkr-cli"
+version = "0.1.0"
+dependencies = [
+ "brokkr-adapt",
+ "brokkr-audit",
+ "brokkr-barrier",
+ "brokkr-bifrost",
+ "brokkr-core",
+ "brokkr-crypto",
+ "brokkr-gate",
+ "brokkr-genome",
+ "brokkr-intent",
+ "brokkr-reasoner",
+ "brokkr-sentinel",
+ "brokkr-tools",
+]
+
+[[package]]
 name = "brokkr-core"
 version = "0.1.0"
 

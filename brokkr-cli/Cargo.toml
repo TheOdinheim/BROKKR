@@ -1,0 +1,28 @@
+[package]
+name = "brokkr-cli"
+description = "The orchestrator — the governed action cycle (Architecture §5), built LAST. A binary whose logic lives in lib.rs so integration tests compose it from test doubles. execute_hop runs one iteration: BIFRÖST guards the crossing → MÍMIR proposes (untrusted) → REGIN checks the genome → SINDRI costimulates → HÚÐ governs the crossing → the tool executes → HEIMDALL reconciles; SAGA records every decision. A denial at any gate stops the cycle and names where. The orchestrator is the sole composition point — it depends on every governance crate, and nothing depends on it (I-5, one-way). now is per-call (I-13); no unsafe, no FFI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "brokkr"
+path = "src/main.rs"
+
+[dependencies]
+# The orchestrator is the ONE crate that depends on everything — the composition point. The
+# direction is one-way (I-5): brokkr-cli depends on the governance crates; none depends on it.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }
+brokkr-intent = { path = "../brokkr-intent" }
+brokkr-gate = { path = "../brokkr-gate" }
+brokkr-genome = { path = "../brokkr-genome" }
+brokkr-barrier = { path = "../brokkr-barrier" }
+brokkr-sentinel = { path = "../brokkr-sentinel" }
+brokkr-adapt = { path = "../brokkr-adapt" }
+brokkr-audit = { path = "../brokkr-audit" }
+brokkr-bifrost = { path = "../brokkr-bifrost" }
+brokkr-reasoner = { path = "../brokkr-reasoner" }
+brokkr-tools = { path = "../brokkr-tools" }

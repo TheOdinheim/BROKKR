@@ -17,6 +17,7 @@ members = [
     "brokkr-adapt",
     "brokkr-reasoner",
     "brokkr-tools",
+    "brokkr-cli",
 ]
 
 [workspace.package]
