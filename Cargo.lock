@@ -73,9 +73,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "brokkr-reasoner"
+version = "0.1.0"
+dependencies = [
+ "brokkr-barrier",
+ "brokkr-bifrost",
+ "brokkr-core",
+]
+
+[[package]]
 name = "brokkr-sentinel"
 version = "0.1.0"
 dependencies = [
  "brokkr-core",
  "brokkr-crypto",
+]
+
+[[package]]
+name = "brokkr-tools"
+version = "0.1.0"
+dependencies = [
+ "brokkr-core",
 ]

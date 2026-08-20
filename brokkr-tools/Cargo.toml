@@ -1,0 +1,14 @@
+[package]
+name = "brokkr-tools"
+description = "The tools BROKKR may invoke — the untrusted side of the dependency line. A ToolExecutor executes an already-AuthorizedAction (SINDRI authorized it; the tool does NOT re-check — it cannot even construct an AuthorizedAction, whose mint is sealed in brokkr-core::gate). Tools are identified by ToolId; the executor (Phase 11) maps ToolId to an implementation. Phase 10 builds the trait and stubs; real file/shell execution is a deployment concern. Pure logic, no unsafe. No governance crate depends on this."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Tools receive a brokkr-core AuthorizedAction and read its Action. Nothing else — a tool cannot
+# mint an AuthorizedAction (sealed) and does not re-authorize. I-5: no governance crate depends on
+# brokkr-tools; brokkr-tools reaches no gate/genome/etc.
+brokkr-core = { path = "../brokkr-core" }

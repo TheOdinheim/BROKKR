@@ -1,0 +1,20 @@
+[package]
+name = "brokkr-reasoner"
+description = "MÍMIR — the advisory reasoner (untrusted). Implements the brokkr-core Reasoner trait: propose takes a ClearedContext (bifrost-cleared, I-12) and the current attenuated scope, calls a ModelBackend seam with the cleared PAYLOAD (text, never the token, never a gate), and wraps the result as an untrusted Proposal that carries no authority. The endpoint is checked registered at construction. I-6: brokkr-reasoner is the sole crate that makes a model call, and only through BIFRÖST; no governance crate depends on it. Pure logic, no unsafe; the real model API call is a backend seam (deployment concern)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# MÍMIR proposes over committed types (brokkr-core) and lives on the BIFRÖST side of the trust
+# line (brokkr-bifrost) — I-6: the sole crate that makes a model call, and only through BIFRÖST.
+# No governance crate depends on brokkr-reasoner (I-5). No model call is built here (seam).
+brokkr-core = { path = "../brokkr-core" }
+brokkr-bifrost = { path = "../brokkr-bifrost" }
+
+[dev-dependencies]
+# The end-to-end test constructs a real BIFRÖST to clear a context, using the barrier's ready-made
+# in-memory endpoint-ceiling / acceptance resolvers. Test-only.
+brokkr-barrier = { path = "../brokkr-barrier" }
