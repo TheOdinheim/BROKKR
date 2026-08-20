@@ -1,0 +1,18 @@
+[package]
+name = "brokkr-adapt"
+description = "KVASIR — the Maturation Pipeline (AMD-003). Four poisoning gates over a candidate refined detector: seeding (P-6.1, only a DAP-confirmed incident may seed — verified through a ConfirmedIncidentLedger seam, not the caller's own claim), selection (P-6.2, corpus-digest integrity + non-containment of the seeding sample + improvement without coverage regression), tolerance (P-6.3, HEIMDALL's screen — discarded if it raises host harm regardless of detection gains), and activation (P-6.4/5/6, dual-family provenance signature, version-equality on screen and corpus, DAP approval; returns the prior generation so activation is reversible). KVASIR gates; it does not invent — the DetectorDelta is authored, not derived. Pure logic, no unsafe. I-9: does NOT depend on brokkr-reasoner — the agent does not teach itself. Phase 9."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# KVASIR gates a candidate detector against confirmed incidents. It reasons over committed
+# maturation types (brokkr-core), verifies dual-family provenance signatures and hashes the
+# evaluation corpus (brokkr-crypto), and consumes brokkr-sentinel's Observation/Detector surface
+# and HEIMDALL's central-tolerance screen (Gate 3). I-9: SHALL NOT depend on brokkr-reasoner —
+# the agent does not teach itself. I-5: it reaches no brokkr-tools/brokkr-cli.
+brokkr-core = { path = "../brokkr-core" }
+brokkr-crypto = { path = "../brokkr-crypto" }
+brokkr-sentinel = { path = "../brokkr-sentinel" }
