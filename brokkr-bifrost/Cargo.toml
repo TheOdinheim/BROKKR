@@ -16,7 +16,8 @@ rust-version.workspace = true
 # NOT depend on brokkr-reasoner, brokkr-tools, or brokkr-cli. I-6: BIFRÖST does not call a model.
 brokkr-core = { path = "../brokkr-core" }
 brokkr-barrier = { path = "../brokkr-barrier" }
-
-[dev-dependencies]
-# The tests build valid, signed BCRs and DAP-verifying keys to exercise the real HÚÐ gate.
+# Phase 12: BIFRÖST owns the real mTLS transport to the model endpoint (the "wire"). It calls
+# brokkr-crypto's safe TlsClient (the sole crate permitted unsafe / linking wolfssl). I-6: the
+# model call passes THROUGH BIFRÖST — brokkr-reasoner reaches a socket only via this crate. brokkr-
+# crypto was already a transitive dep through brokkr-barrier; this makes the transport use direct.
 brokkr-crypto = { path = "../brokkr-crypto" }

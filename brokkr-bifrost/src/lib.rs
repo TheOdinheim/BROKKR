@@ -35,13 +35,18 @@
 //!   from REGIN's signed classification policy (§6.6) and belongs to the assembling party, not here.
 //!   A `Context` whose `bcr` is `None` above Public is denied by HÚÐ's condition 2.
 //!
-//! ## Scope (§6.10 — what Phase 8.5 does NOT build)
+//! ## Scope
 //!
-//! Pure logic over `brokkr-core` and `brokkr-barrier` — no FFI, no `unsafe`, no network I/O. The
-//! TLS handshake, real mTLS, and the negotiated-group readback are **inputs** (the negotiated group
-//! rides on `Destination::Reasoner`); there are no sockets. No model call (I-6) — BIFRÖST clears a
-//! context so MÍMIR (Phase 10) may use it. The crossing record is produced as a **value**; SAGA
-//! recording is Phase 11.
+//! **The clearance logic** ([`Bifrost`], below) is pure logic over `brokkr-core` and
+//! `brokkr-barrier` — no FFI, no `unsafe`. The negotiated group rides on `Destination::Reasoner`
+//! as an **input** to that logic; the clearance path opens no socket.
+//!
+//! **The real mTLS transport** ([`mtls`]) was added in Phase 12: [`MtlsTransport`] opens a wolfSSL
+//! TLS 1.3 mutual-auth connection to the gateway (via `brokkr-crypto`'s safe `TlsClient` — this
+//! crate still has **no `unsafe`**), reads the negotiated group that the clearance logic consumes,
+//! and carries the model call. **I-6 lives here:** the model's network I/O passes through BIFRÖST,
+//! and MÍMIR reaches a socket only via this crate's transport. The crossing record is still a
+//! **value**; SAGA recording is the orchestrator's (Phase 11).
 
 #![forbid(unsafe_code)]
 // CLAUDE.md §6 — no panics in production paths (tests are a separate crate).
@@ -54,6 +59,9 @@
     clippy::unimplemented,
     clippy::unreachable
 )]
+
+pub mod mtls;
+pub use mtls::{GatewayConfig, MtlsTransport, Negotiated, TransportError, map_group};
 
 use brokkr_barrier::{AcceptanceResolver, EndpointCeiling, Huth};
 use brokkr_core::barrier::{Barrier, BarrierVerdict, BoundaryFlow, Destination};

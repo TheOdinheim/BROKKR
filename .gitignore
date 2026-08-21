@@ -9,3 +9,8 @@ Thumbs.db
 # workspace-local wolfSSL rpath convenience (hard-codes an absolute dev path,
 # /home/jerem/wolfssl/build); machine-specific, not committed.
 .cargo/config.toml
+
+# Phase-12 dev mTLS material for the local nginx gateway (CA, server, client certs
+# and private keys). Machine-specific dev infrastructure — never committed. Private
+# keys are additionally covered by *.key above; this excludes the whole directory.
+/certs/

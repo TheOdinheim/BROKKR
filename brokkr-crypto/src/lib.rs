@@ -29,14 +29,16 @@
     clippy::unreachable
 )]
 
-pub mod ffi; // the sole `unsafe` module
+pub mod ffi; // the sole `unsafe` module for wolfCrypt
 pub mod hash;
 pub mod shred;
 pub mod sign;
+pub mod tls; // the second `unsafe` module — wolfSSL TLS 1.3 client (Phase 12)
 
 pub use hash::Sha384Hasher;
 pub use shred::{SubjectKey, WrappedKey};
 pub use sign::{DualKeyPair, DualPublicKey, MlDsaSigner, SlhDsaSigner};
+pub use tls::{TlsClient, TlsConfig, TlsError};
 
 /// The only correct statement of cryptographic posture for this build (CLAUDE.md §7,
 /// BROKKR-ARCH §9). Never write, log, or document anything stronger.

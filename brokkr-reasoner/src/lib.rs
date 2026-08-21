@@ -44,8 +44,10 @@
 
 pub mod backend;
 pub mod mimir;
+pub mod ollama;
 pub mod registry;
 
 pub use backend::{BackendError, BackendProposal, ModelBackend};
 pub use mimir::Mimir;
+pub use ollama::OllamaBackend;
 pub use registry::{InMemoryRegistry, RegisteredEndpoints};
