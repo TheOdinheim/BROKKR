@@ -60,7 +60,7 @@ fn build_chain() -> (
     DualKeyPair,
 ) {
     let skuld = Skuld;
-    let root_kp = DualKeyPair::generate().unwrap();
+    let mut root_kp = DualKeyPair::generate().unwrap();
     let root = skuld
         .sign_root(
             SubjectId::new("principal"),
@@ -69,12 +69,12 @@ fn build_chain() -> (
             invs(&["no-network-egress"]),
             Nonce(42),
             Timestamp(10_000),
-            &root_kp,
+            &mut root_kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
 
-    let hop1_kp = DualKeyPair::generate().unwrap();
+    let mut hop1_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -82,12 +82,12 @@ fn build_chain() -> (
             scope(&["read", "write"]),
             vec![],
             invs(&["read-only-outside-src"]),
-            &hop1_kp,
+            &mut hop1_kp,
             Timestamp(100),
         )
         .unwrap();
 
-    let hop2_kp = DualKeyPair::generate().unwrap();
+    let mut hop2_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -95,7 +95,7 @@ fn build_chain() -> (
             scope(&["read"]),
             vec![],
             InvariantSet::default(),
-            &hop2_kp,
+            &mut hop2_kp,
             Timestamp(200),
         )
         .unwrap();

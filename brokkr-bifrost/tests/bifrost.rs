@@ -59,7 +59,7 @@ fn signed_bcr(
     datum: &str,
     classification: Classification,
     personal: Option<PersonalDataTag>,
-    issuer: &DualKeyPair,
+    issuer: &mut DualKeyPair,
 ) -> BoundaryCustodyRecord {
     signed_bcr_expiring(
         datum,
@@ -77,7 +77,7 @@ fn signed_bcr_expiring(
     classification: Classification,
     personal: Option<PersonalDataTag>,
     expiry: Timestamp,
-    issuer: &DualKeyPair,
+    issuer: &mut DualKeyPair,
 ) -> BoundaryCustodyRecord {
     let mut bcr = BoundaryCustodyRecord {
         datum: DatumRef::new(datum),
@@ -143,9 +143,9 @@ fn test_oqgf_m_5_classical_group_collapses_to_public() {
     // collapses to Public regardless of the endpoint's ceiling, so an Internal crossing — with an
     // otherwise-valid BCR — is DENIED on channel-strength collapse. The record states the claim;
     // the channel decides whether the claim is reachable.
-    let issuer = DualKeyPair::generate().unwrap();
+    let mut issuer = DualKeyPair::generate().unwrap();
     let bifrost = bifrost_with(Classification::Secret, &issuer);
-    let bcr = signed_bcr("d1", Classification::Internal, None, &issuer);
+    let bcr = signed_bcr("d1", Classification::Internal, None, &mut issuer);
     let ctx = context("d1", Classification::Internal, None, Some(bcr));
 
     let verdict = bifrost.evaluate_context(&ctx, &reasoner(NamedGroup::X25519), Timestamp(NOW));
@@ -158,9 +158,9 @@ fn test_oqgf_m_5_classical_group_collapses_to_public() {
 #[test]
 fn test_pqc_group_permits_declared_ceiling() {
     // Endpoint Secret, a PQC-hybrid handshake: a Secret context with a valid BCR clears.
-    let issuer = DualKeyPair::generate().unwrap();
+    let mut issuer = DualKeyPair::generate().unwrap();
     let bifrost = bifrost_with(Classification::Secret, &issuer);
-    let bcr = signed_bcr("d1", Classification::Secret, None, &issuer);
+    let bcr = signed_bcr("d1", Classification::Secret, None, &mut issuer);
     let ctx = context("d1", Classification::Secret, None, Some(bcr));
 
     let dest = reasoner(NamedGroup::X25519MlKem768);
@@ -176,9 +176,9 @@ fn test_pqc_group_permits_declared_ceiling() {
 fn test_effective_is_min_not_endpoint() {
     // Endpoint ceiling PUBLIC, a strong PQC channel: the channel does NOT raise the endpoint.
     // effective = min(Public, Secret) = Public, so an Internal crossing is denied even over PQC.
-    let issuer = DualKeyPair::generate().unwrap();
+    let mut issuer = DualKeyPair::generate().unwrap();
     let bifrost = bifrost_with(Classification::Public, &issuer);
-    let bcr = signed_bcr("d1", Classification::Internal, None, &issuer);
+    let bcr = signed_bcr("d1", Classification::Internal, None, &mut issuer);
     let ctx = context("d1", Classification::Internal, None, Some(bcr));
 
     let verdict = bifrost.evaluate_context(
@@ -298,7 +298,7 @@ fn test_oqgf_m_14_i13_i9_bcr_expiry_evaluated_against_call_time_not_a_held_clock
     // test cannot pass against a stored clock. The original bifrost tests all injected `now` at
     // construction (`Bifrost::new(..., Timestamp(NOW))`) and evaluated once, sharing the defect's
     // assumption; none of them could have caught the held clock.
-    let issuer = DualKeyPair::generate().unwrap();
+    let mut issuer = DualKeyPair::generate().unwrap();
     let bifrost = bifrost_with(Classification::Secret, &issuer);
     // A BCR authorizing Secret to the endpoint, expiring at 5_000.
     let bcr = signed_bcr_expiring(
@@ -306,7 +306,7 @@ fn test_oqgf_m_14_i13_i9_bcr_expiry_evaluated_against_call_time_not_a_held_clock
         Classification::Secret,
         None,
         Timestamp(5_000),
-        &issuer,
+        &mut issuer,
     );
     let ctx = context("dv", Classification::Secret, None, Some(bcr));
     let dest = reasoner(NamedGroup::X25519MlKem768); // PQC — no channel-strength collapse

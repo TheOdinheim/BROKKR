@@ -24,8 +24,8 @@ use brokkr_audit::AuditEvent;
 use brokkr_barrier::{InMemoryAcceptances, InMemoryCeiling};
 use brokkr_bifrost::Bifrost;
 use brokkr_cli::{
-    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, HopRequest, HopResult, Orchestrator,
-    Sentinel, SignalRouter,
+    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, Guards, HopRequest, HopResult,
+    Orchestrator, Sentinel, SignalRouter,
 };
 use brokkr_core::barrier::{
     BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryFlow, Destination,
@@ -107,12 +107,12 @@ fn fx() -> &'static Fixtures {
 }
 
 fn build_fixtures() -> Fixtures {
-    let primary = DualKeyPair::generate().expect("primary keypair");
-    let attacker = DualKeyPair::generate().expect("attacker keypair");
+    let mut primary = DualKeyPair::generate().expect("primary keypair");
+    let mut attacker = DualKeyPair::generate().expect("attacker keypair");
     let primary_pub = primary.public_key_bytes().expect("primary public");
     let dummy_sig = primary.sign_dual(b"attestation").expect("dummy sig");
 
-    let sign = |kp: &DualKeyPair, scope: IntentScope, invs: InvariantSet, expiry: Timestamp| {
+    let sign = |kp: &mut DualKeyPair, scope: IntentScope, invs: InvariantSet, expiry: Timestamp| {
         let root: RootIntent = Skuld
             .sign_root(
                 SubjectId::new(PRINCIPAL),
@@ -132,50 +132,55 @@ fn build_fixtures() -> Fixtures {
         primary_pub,
         dummy_sig,
         legit: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("write")]),
             InvariantSet::new([]),
             far,
         ),
         read_only: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("read")]),
             InvariantSet::new([]),
             far,
         ),
-        empty: sign(&primary, IntentScope::empty(), InvariantSet::new([]), far),
+        empty: sign(
+            &mut primary,
+            IntentScope::empty(),
+            InvariantSet::new([]),
+            far,
+        ),
         forbid_priv: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("write")]),
             InvariantSet::new([inv("no-privileged")]),
             far,
         ),
         expired: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("write")]),
             InvariantSet::new([]),
             Timestamp(1),
         ),
         forged: sign(
-            &attacker,
+            &mut attacker,
             IntentScope::new([cap("write")]),
             InvariantSet::new([]),
             far,
         ),
         network: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("network")]),
             InvariantSet::new([inv("no-network")]),
             far,
         ),
         unknown_inv: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("write")]),
             InvariantSet::new([inv("never-heard-of-this")]),
             far,
         ),
         multi_inv: sign(
-            &primary,
+            &mut primary,
             IntentScope::new([cap("exec")]),
             InvariantSet::new([inv("no-network"), inv("no-exec")]),
             far,
@@ -422,7 +427,8 @@ fn build(
         }),
         Box::new(NoSignals),
         dap(),
-    );
+    )
+    .with_guards(Guards::permissive());
 
     (
         orch,
@@ -682,8 +688,10 @@ fn attack_2_3_expired_chain() {
 
 /// 2.4 — replay: the same valid chain twice. SINDRI is stateless (no nonce ledger), so a valid
 /// authorization is replayable within its expiry window. Documented as a known limitation.
+/// 2.4 — 13-FIX F-1: replay within expiry is now **defended** by the orchestrator's replay guard.
+/// The first hop executes; the second (same `(principal, nonce)`) is denied.
 #[test]
-fn attack_2_4_chain_replay_is_not_defended() {
+fn attack_2_4_chain_replay_is_denied_after_fix() {
     let (orch, spies) = build(
         Box::new(ClearAll),
         Box::new(AllowBarrier),
@@ -692,6 +700,8 @@ fn attack_2_4_chain_replay_is_not_defended() {
         "write_file",
         "/tmp/x",
     );
+    // Turn the replay guard on for this test (the rig is otherwise permissive).
+    let orch = orch.with_guards(Guards::production());
     let r1 = orch.execute_hop(
         req(attestation(PRINCIPAL), fx().legit.clone(), public_ctx()),
         Timestamp(1000),
@@ -700,13 +710,21 @@ fn attack_2_4_chain_replay_is_not_defended() {
         req(attestation(PRINCIPAL), fx().legit.clone(), public_ctx()),
         Timestamp(1000),
     );
-    // Both grant and execute — the finding is that replay within expiry is not prevented by SINDRI.
-    assert!(matches!(r1, HopResult::Executed { .. }), "{r1:?}");
-    assert!(matches!(r2, HopResult::Executed { .. }), "{r2:?}");
+    assert!(
+        matches!(r1, HopResult::Executed { .. }),
+        "first hop grants: {r1:?}"
+    );
+    match &r2 {
+        HopResult::Denied { stage, reason } => {
+            assert_eq!(*stage, DenialStage::Gate);
+            assert!(reason.contains("replay"), "{reason}");
+        }
+        other => panic!("expected replay denial, got {other:?}"),
+    }
     assert_eq!(
         spies.tool.count(),
-        2,
-        "both replays executed (known limitation)"
+        1,
+        "only the first (non-replayed) hop executed"
     );
 }
 
@@ -1032,11 +1050,13 @@ fn attack_5_6_oversized_detail() {
         req(attestation(PRINCIPAL), fx().legit.clone(), public_ctx()),
         Timestamp(1000),
     );
-    // Declared + in scope → granted; the spine treats detail as opaque (size is a tool concern).
-    assert!(matches!(r, HopResult::Executed { .. }), "{r:?}");
+    // 13-FIX F-3: a 10 MiB detail exceeds MAX_DETAIL_BYTES (1 MiB) → denied before the tool runs.
+    // The size cap is unconditional (applies even under the permissive rig).
+    assert_denied(&r, &spies, Some(DenialStage::Gate));
+    assert!(reason_of(&r).contains("size limit"), "{}", reason_of(&r));
     assert_eq!(
         spies.detail_len.load(SeqCst),
-        10 * 1024 * 1024,
-        "the tool received the full detail"
+        0,
+        "the tool never received the oversized detail"
     );
 }

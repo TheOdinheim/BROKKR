@@ -38,4 +38,4 @@
 
 pub mod tool;
 
-pub use tool::{FixedResultTool, NoOpTool, ToolError, ToolExecutor, ToolOutcome};
+pub use tool::{FixedResultTool, NoOpTool, SandboxedTool, ToolError, ToolExecutor, ToolOutcome};

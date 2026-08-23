@@ -49,7 +49,7 @@ fn attestation(subject: &str) -> Attestation {
 /// expiry 10_000. Returns (skuld, root, root_keypair).
 fn signed_root() -> (Skuld, RootIntent, DualKeyPair) {
     let skuld = Skuld;
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let root = skuld
         .sign_root(
             SubjectId::new("principal"),
@@ -58,7 +58,7 @@ fn signed_root() -> (Skuld, RootIntent, DualKeyPair) {
             invs(&["no-network-egress"]),
             Nonce(42),
             Timestamp(10_000),
-            &kp,
+            &mut kp,
         )
         .unwrap();
     (skuld, root, kp)
@@ -113,7 +113,7 @@ fn test_multi_hop_chain_attenuates_and_verifies() {
     let (skuld, root, root_kp) = signed_root();
 
     let chain = IntentProvenanceChain::new(root.clone());
-    let hop1_kp = DualKeyPair::generate().unwrap();
+    let mut hop1_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -121,12 +121,12 @@ fn test_multi_hop_chain_attenuates_and_verifies() {
             scope(&["read", "write"]),
             vec![],
             invs(&["read-only-outside-src"]),
-            &hop1_kp,
+            &mut hop1_kp,
             Timestamp(100),
         )
         .unwrap();
 
-    let hop2_kp = DualKeyPair::generate().unwrap();
+    let mut hop2_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -134,7 +134,7 @@ fn test_multi_hop_chain_attenuates_and_verifies() {
             scope(&["read"]),
             vec![Caveat("no-delete".into())],
             invs(&["no-secret-egress"]),
-            &hop2_kp,
+            &mut hop2_kp,
             Timestamp(200),
         )
         .unwrap();
@@ -172,7 +172,7 @@ fn test_multi_hop_chain_attenuates_and_verifies() {
 fn test_i3_attenuate_rejects_broadening() {
     let (skuld, root, _kp) = signed_root();
     let chain = IntentProvenanceChain::new(root);
-    let hop_kp = DualKeyPair::generate().unwrap();
+    let mut hop_kp = DualKeyPair::generate().unwrap();
     // Emit {read,write,exec,admin} — not a subset of {read,write,exec}.
     let res = skuld.attenuate_signed(
         chain,
@@ -180,7 +180,7 @@ fn test_i3_attenuate_rejects_broadening() {
         scope(&["read", "write", "exec", "admin"]),
         vec![],
         InvariantSet::default(),
-        &hop_kp,
+        &mut hop_kp,
         Timestamp(100),
     );
     assert_eq!(
@@ -195,7 +195,7 @@ fn test_oqgf_m_9_broadened_entry_fails_verification() {
     // BROADEN hop-1's scope (bypassing extend). Verification must fail.
     let (skuld, root, root_kp) = signed_root();
     let chain = IntentProvenanceChain::new(root);
-    let hop1_kp = DualKeyPair::generate().unwrap();
+    let mut hop1_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -203,11 +203,11 @@ fn test_oqgf_m_9_broadened_entry_fails_verification() {
             scope(&["read", "write"]),
             vec![],
             InvariantSet::default(),
-            &hop1_kp,
+            &mut hop1_kp,
             Timestamp(100),
         )
         .unwrap();
-    let hop2_kp = DualKeyPair::generate().unwrap();
+    let mut hop2_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -215,7 +215,7 @@ fn test_oqgf_m_9_broadened_entry_fails_verification() {
             scope(&["read"]),
             vec![],
             InvariantSet::default(),
-            &hop2_kp,
+            &mut hop2_kp,
             Timestamp(200),
         )
         .unwrap();
@@ -245,7 +245,7 @@ fn test_oqgf_m_9_scope_tamper_within_subset_fails_signature() {
     // broadening infeasible.
     let (skuld, root, root_kp) = signed_root();
     let chain = IntentProvenanceChain::new(root);
-    let hop_kp = DualKeyPair::generate().unwrap();
+    let mut hop_kp = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -253,7 +253,7 @@ fn test_oqgf_m_9_scope_tamper_within_subset_fails_signature() {
             scope(&["read", "write"]),
             vec![],
             InvariantSet::default(),
-            &hop_kp,
+            &mut hop_kp,
             Timestamp(100),
         )
         .unwrap();
@@ -276,7 +276,7 @@ fn test_oqgf_m_10_invariants_accumulate() {
     // and there is no API that removes or weakens one.
     let (skuld, root, _kp) = signed_root(); // root invariants {no-network-egress}
     let chain = IntentProvenanceChain::new(root);
-    let kp1 = DualKeyPair::generate().unwrap();
+    let mut kp1 = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -284,11 +284,11 @@ fn test_oqgf_m_10_invariants_accumulate() {
             scope(&["read", "write"]),
             vec![],
             invs(&["inv-a"]),
-            &kp1,
+            &mut kp1,
             Timestamp(1),
         )
         .unwrap();
-    let kp2 = DualKeyPair::generate().unwrap();
+    let mut kp2 = DualKeyPair::generate().unwrap();
     let chain = skuld
         .attenuate_signed(
             chain,
@@ -296,7 +296,7 @@ fn test_oqgf_m_10_invariants_accumulate() {
             scope(&["read"]),
             vec![],
             InvariantSet::default(), // adds nothing
-            &kp2,
+            &mut kp2,
             Timestamp(2),
         )
         .unwrap();
@@ -313,14 +313,14 @@ fn test_oqgf_m_14_expired_chain_is_refused() {
 
     // (a) An expired chain authorizes no new hop.
     let chain = IntentProvenanceChain::new(root.clone());
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let res = skuld.attenuate_signed(
         chain,
         attestation("h"),
         scope(&["read"]),
         vec![],
         InvariantSet::default(),
-        &kp,
+        &mut kp,
         Timestamp(20_000), // now > expiry
     );
     assert_eq!(

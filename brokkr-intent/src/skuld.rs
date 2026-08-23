@@ -196,7 +196,7 @@ impl Skuld {
         invariants: InvariantSet,
         nonce: Nonce,
         expiry: Timestamp,
-        keypair: &DualKeyPair,
+        keypair: &mut DualKeyPair,
     ) -> Result<RootIntent, IntentError> {
         let mut root = RootIntent {
             principal,
@@ -245,7 +245,7 @@ impl Skuld {
         emitted_scope: IntentScope,
         added_caveats: Vec<Caveat>,
         added_invariants: InvariantSet,
-        hop_keypair: &DualKeyPair,
+        hop_keypair: &mut DualKeyPair,
         now: Timestamp,
     ) -> Result<IntentProvenanceChain, IntentError> {
         // Freshness first: an expired chain authorizes nothing.

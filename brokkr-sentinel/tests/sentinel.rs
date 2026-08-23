@@ -146,7 +146,12 @@ fn matching_selfset(obs: &[Observation]) -> SelfSet {
     }
 }
 
-fn signed_grant(target: &str, scope: &str, expiry: u64, dap_kp: &DualKeyPair) -> ToleranceGrant {
+fn signed_grant(
+    target: &str,
+    scope: &str,
+    expiry: u64,
+    dap_kp: &mut DualKeyPair,
+) -> ToleranceGrant {
     let mut g = ToleranceGrant {
         target: DetectorId::new(target),
         scope: SuppressionScope {
@@ -195,7 +200,7 @@ fn signed_decision(
     at: u64,
     nonce: u64,
     expiry: u64,
-    signer: &DualKeyPair,
+    signer: &mut DualKeyPair,
 ) -> ResolutionDecision {
     let mut d = ResolutionDecision::new(
         EscalationId::new(id),
@@ -223,9 +228,9 @@ fn only(detections: &[Detection]) -> &Detection {
 
 #[test]
 fn test_oqgf_p_2_tolerance_refuses_deterministic_target() {
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
-    let grant = signed_grant("det-1", "signal:x", 1000, &dap_kp);
+    let grant = signed_grant("det-1", "signal:x", 1000, &mut dap_kp);
     // core's provided `grant` (NOT overridden) refuses a Deterministic target before
     // grant_heuristic is ever reached.
     let r = h.grant(grant, ResponseClass::Deterministic);
@@ -259,12 +264,12 @@ fn test_oqgf_p_4_live_grant_suppresses_and_records() {
     // A live grant scoped to the firing detector suppresses it — and the Detection is STILL
     // returned, carrying `suppressed_by` and no Signal. Discarding it would make a grant
     // indistinguishable from a detector that was never registered.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
     h.register_detector(Box::new(FiresAlways(DetectorId::new("det-1"))));
     assert!(
         h.grant(
-            signed_grant("det-1", "signal:x", 5000, &dap_kp),
+            signed_grant("det-1", "signal:x", 5000, &mut dap_kp),
             ResponseClass::Heuristic
         )
         .is_ok()
@@ -286,12 +291,12 @@ fn test_oqgf_p_4_i13_expired_grant_stops_suppressing() {
     // HEIMDALL, the SAME grant, the SAME firing observation, `observe` at two times: suppressed
     // before the grant's expiry, RAISING after. A held clock is a single stored value and cannot
     // produce two outcomes from one instance.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
     h.register_detector(Box::new(FiresAlways(DetectorId::new("det-1"))));
     assert!(
         h.grant(
-            signed_grant("det-1", "signal:x", 5000, &dap_kp),
+            signed_grant("det-1", "signal:x", 5000, &mut dap_kp),
             ResponseClass::Heuristic
         )
         .is_ok()
@@ -319,12 +324,12 @@ fn test_oqgf_p_4_i13_expired_grant_stops_suppressing() {
 #[test]
 fn test_oqgf_p_4_out_of_scope_grant_does_not_suppress() {
     // A live grant scoped to a DIFFERENT detector does not silence this one.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
     h.register_detector(Box::new(FiresAlways(DetectorId::new("det-1"))));
     assert!(
         h.grant(
-            signed_grant("det-2", "signal:x", 5000, &dap_kp),
+            signed_grant("det-2", "signal:x", 5000, &mut dap_kp),
             ResponseClass::Heuristic
         )
         .is_ok()
@@ -342,9 +347,9 @@ fn test_oqgf_p_4_out_of_scope_grant_does_not_suppress() {
 
 #[test]
 fn test_oqgf_p_4_valid_grant_attaches_on_heuristic() {
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
-    let grant = signed_grant("det-1", "signal:x", 1000, &dap_kp);
+    let grant = signed_grant("det-1", "signal:x", 1000, &mut dap_kp);
     assert!(h.grant(grant, ResponseClass::Heuristic).is_ok());
 }
 
@@ -356,9 +361,9 @@ fn test_oqgf_p_4_expired_grant_is_retained_not_refused_at_issuance() {
     // liveness check moved to the loop (`observe`), where it never suppresses. So issuance
     // succeeds; the loop is what refuses to suppress on an expired grant
     // (test_oqgf_p_4_i13_expired_grant_stops_suppressing).
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
-    let grant = signed_grant("det-1", "signal:x", 1000, &dap_kp); // expiry 1000, past for now=2000
+    let grant = signed_grant("det-1", "signal:x", 1000, &mut dap_kp); // expiry 1000, past for now=2000
     assert!(
         h.grant(grant, ResponseClass::Heuristic).is_ok(),
         "an expired grant is retained at issuance, not refused"
@@ -375,10 +380,10 @@ fn test_oqgf_p_4_expired_grant_is_retained_not_refused_at_issuance() {
 #[test]
 fn test_oqgf_p_4_forged_grant_reports_signature_invalid() {
     let dap_kp = DualKeyPair::generate().unwrap();
-    let attacker = DualKeyPair::generate().unwrap();
+    let mut attacker = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
     // Signed by the attacker, not the DAP → not authentic → SignatureInvalid (Rev 1.12).
-    let grant = signed_grant("det-1", "signal:x", 1000, &attacker);
+    let grant = signed_grant("det-1", "signal:x", 1000, &mut attacker);
     assert_eq!(
         h.grant(grant, ResponseClass::Heuristic),
         Err(ToleranceError::SignatureInvalid)
@@ -387,9 +392,9 @@ fn test_oqgf_p_4_forged_grant_reports_signature_invalid() {
 
 #[test]
 fn test_oqgf_p_4_blanket_scope_refused() {
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let h = heimdall_with(corpus_obs(), &dap_kp, 0.1, Some(10), 2);
-    let grant = signed_grant("det-1", "", 1000, &dap_kp); // empty scope = blanket
+    let grant = signed_grant("det-1", "", 1000, &mut dap_kp); // empty scope = blanket
     assert_eq!(
         h.grant(grant, ResponseClass::Heuristic),
         Err(ToleranceError::OutOfScope)
@@ -609,13 +614,13 @@ fn test_oqgf_m_12_mismatch_deviates_and_none_does_not() {
 #[test]
 fn test_oqgf_p_8_5_cannot_lower_above_baseline_without_dap() {
     let dap_kp = DualKeyPair::generate().unwrap();
-    let attacker = DualKeyPair::generate().unwrap();
+    let mut attacker = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
     // A decision signed by the ATTACKER (not the DAP) is not DAP-confirmed.
-    let forged = signed_decision("e1", 1000, 1, 1_000_000, &attacker);
+    let forged = signed_decision("e1", 1000, 1, 1_000_000, &mut attacker);
     assert_eq!(
         eir.resolve(forged, Timestamp(1000)),
         Err(ResolveError::NeedsDapConfirmation)
@@ -624,7 +629,7 @@ fn test_oqgf_p_8_5_cannot_lower_above_baseline_without_dap() {
 
 #[test]
 fn test_resolve_succeeds_with_dap_and_eligibility() {
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
@@ -633,7 +638,7 @@ fn test_resolve_succeeds_with_dap_and_eligibility() {
         eir.may_resolve(&EscalationId::new("e1"), Timestamp(1000)),
         ResolutionVerdict::Eligible { needs_dap: true }
     ));
-    let decision = signed_decision("e1", 1000, 1, 1_000_000, &dap_kp);
+    let decision = signed_decision("e1", 1000, 1, 1_000_000, &mut dap_kp);
     assert!(eir.resolve(decision, Timestamp(1000)).is_ok());
 }
 
@@ -642,12 +647,12 @@ fn test_oqgf_p_8_5_expired_decision_reports_expired() {
     // Valid in every respect except freshness: correctly signed, escalation eligible, but the
     // decision's expiry is in the past relative to the call-site `now` → Expired (latency, not an
     // attack). `now` is a parameter of `resolve` (I-13), not a held clock.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
-    let decision = signed_decision("e1", 500, 7, 1000, &dap_kp); // expiry 1000
+    let decision = signed_decision("e1", 500, 7, 1000, &mut dap_kp); // expiry 1000
     assert_eq!(
         eir.resolve(decision, Timestamp(2000)), // now 2000 > expiry 1000
         Err(ResolveError::Expired)
@@ -659,12 +664,12 @@ fn test_oqgf_p_8_5_replayed_nonce_still_refused() {
     // Replay protection survives the Rev 1.16 reorder. A decision resolves once; presented again
     // (unexpired, same nonce) it is refused as ReplayedNonce — even after the escalation stood
     // down and was RAISED AGAIN (the accepted nonce persists across resolution and re-raising).
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
-    let decision = signed_decision("e1", 1000, 42, 1_000_000, &dap_kp);
+    let decision = signed_decision("e1", 1000, 42, 1_000_000, &mut dap_kp);
     assert!(
         eir.resolve(decision.clone(), Timestamp(1000)).is_ok(),
         "first presentation resolves"
@@ -685,13 +690,13 @@ fn test_oqgf_p_8_5_expired_before_replay_reports_expired() {
     // ReplayedNonce and the Expired arm would be unreachable for exactly this case; under the
     // corrected order it reports Expired — too old to act on is too old regardless of how many
     // times it has been seen. This test FAILS against the pre-Rev-1.16 order.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
     // expiry 1000; accepted at now=500 (fresh).
-    let decision = signed_decision("e1", 200, 99, 1000, &dap_kp);
+    let decision = signed_decision("e1", 200, 99, 1000, &mut dap_kp);
     assert!(
         eir.resolve(decision.clone(), Timestamp(500)).is_ok(),
         "first presentation (fresh) resolves and accepts the nonce"
@@ -710,12 +715,12 @@ fn test_oqgf_p_8_5_expired_before_replay_reports_expired() {
 #[test]
 fn test_sentinel_and_core_encodings_agree() {
     // Guards against the sentinel's verification path and core's encoding ever diverging again.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let eir = Eir::new(public_of(&dap_kp));
     eir.raise(escalation("e1", 10, 10, 100_000), Timestamp(0));
     eir.clear_condition_met(&EscalationId::new("e1"), Timestamp(0));
 
-    let good = signed_decision("e1", 1000, 7, 1_000_000, &dap_kp);
+    let good = signed_decision("e1", 1000, 7, 1_000_000, &mut dap_kp);
     assert_eq!(
         resolution_signed_content(&good),
         resolution_signed_content(&good.clone())
@@ -859,7 +864,7 @@ fn test_sentinel_domain_separated_from_genome_barrier_audit() {
     }
 
     // Crypto: a signature over sentinel bytes does not verify over foreign-tagged bytes.
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let pubk = kp.public_key_bytes().unwrap();
     let foreign_bytes = tagged(b"brokkr-audit:record:v1", b"some-audit-record");
     let sig_sentinel = kp.sign_dual(&sentinel_bytes).unwrap();

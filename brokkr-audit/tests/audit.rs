@@ -169,7 +169,7 @@ fn test_export_verifies_under_exporter_key() {
 fn test_oqgf_a_6_resigning_does_not_break_the_chain() {
     // The Rev 1.10 correction, executable: because the chain links over signed content only,
     // re-signing an early record leaves every downstream link byte-identical.
-    let (saga, new_gen_signer) = new_saga(None);
+    let (saga, mut new_gen_signer) = new_saga(None);
     saga.append(correction(0, "a"), dap(), Timestamp(1))
         .unwrap();
     saga.append(authorization(), dap(), Timestamp(2)).unwrap();
@@ -179,7 +179,7 @@ fn test_oqgf_a_6_resigning_does_not_break_the_chain() {
     let prev_of_1_before = saga.records()[1].prev.clone();
     let prev_of_2_before = saga.records()[2].prev.clone();
 
-    saga.resign(0, CryptoGeneration(2), &new_gen_signer, Timestamp(100))
+    saga.resign(0, CryptoGeneration(2), &mut new_gen_signer, Timestamp(100))
         .unwrap();
 
     assert!(
@@ -196,14 +196,14 @@ fn test_oqgf_a_6_resigning_does_not_break_the_chain() {
 
 #[test]
 fn test_oqgf_a_6_resigning_preserves_original_signature() {
-    let (saga, new_gen_signer) = new_saga(None);
+    let (saga, mut new_gen_signer) = new_saga(None);
     saga.append(correction(0, "a"), dap(), Timestamp(1))
         .unwrap();
 
     let original = saga.records()[0].signatures[0].clone();
     assert_eq!(original.generation, CryptoGeneration(1));
 
-    saga.resign(0, CryptoGeneration(2), &new_gen_signer, Timestamp(100))
+    saga.resign(0, CryptoGeneration(2), &mut new_gen_signer, Timestamp(100))
         .unwrap();
 
     let after = saga.records();
@@ -278,7 +278,7 @@ fn test_oqgf_p_11_7_resigned_erased_record_stays_irrecoverable() {
     // THE MOST IMPORTANT TEST. Erase, then re-sign the erased record, then confirm the
     // plaintext is STILL unrecoverable: re-signing operates over ciphertext and canonical
     // bytes only and holds no subject key, so it cannot undo an erasure.
-    let (saga, new_gen_signer) = new_saga(None);
+    let (saga, mut new_gen_signer) = new_saga(None);
     let subject = SubjectId::new("subject-7");
 
     let mut subject_key = SubjectKey::generate().unwrap();
@@ -319,7 +319,7 @@ fn test_oqgf_p_11_7_resigned_erased_record_stays_irrecoverable() {
     saga.resign(
         personal_seq,
         CryptoGeneration(2),
-        &new_gen_signer,
+        &mut new_gen_signer,
         Timestamp(3),
     )
     .unwrap();
@@ -480,7 +480,7 @@ fn test_audit_domain_separated_from_genome_and_barrier() {
     let public = saga.signer_public().unwrap();
     let export = saga.export().unwrap();
     // (export gives us nothing to sign with directly; use a fresh keypair for the crypto test)
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let kp_public = kp.public_key_bytes().unwrap();
 
     let barrier_like = tagged(b"brokkr-barrier:bcr:v1", b"some-bcr-content");
@@ -508,7 +508,7 @@ fn test_audit_domain_separated_from_genome_and_barrier() {
 #[test]
 fn test_acceptance_register_assigns_id() {
     let (saga, _) = new_saga(None);
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let acceptance = RiskAcceptance {
         finding: FindingId::new("42:d1:unauthorized-destination"),
         gate: Some(DeterministicGateId::Barrier),

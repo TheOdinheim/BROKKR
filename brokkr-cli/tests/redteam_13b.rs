@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use brokkr_audit::AuditEvent;
 use brokkr_cli::{
-    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, HopRequest, HopResult, Orchestrator,
-    Sentinel, SignalRouter,
+    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, Guards, HopRequest, HopResult,
+    Orchestrator, Sentinel, SignalRouter,
 };
 use brokkr_core::barrier::{BarrierVerdict, BoundaryFlow, Destination};
 use brokkr_core::classification::{Classification, NamedGroup};
@@ -114,13 +114,16 @@ fn fx() -> &'static Fixtures {
 }
 
 fn build_fixtures() -> Fixtures {
-    let a = DualKeyPair::generate().expect("A keypair");
-    let b = DualKeyPair::generate().expect("B keypair");
+    let mut a = DualKeyPair::generate().expect("A keypair");
+    let mut b = DualKeyPair::generate().expect("B keypair");
     let a_pub = a.public_key_bytes().expect("A public");
     let b_pub = b.public_key_bytes().expect("B public");
 
     let far = Timestamp(9_000_000);
-    let sign = |scope: IntentScope, invs: InvariantSet| {
+    // 13-FIX F-4: `sign_dual` is `&mut`, so the signer is a parameter (not a captured `&a`) —
+    // otherwise the closure would hold a persistent mutable borrow of `a` that the two-hop chain,
+    // which also signs with `a`, could not share.
+    let sign = |kp: &mut DualKeyPair, scope: IntentScope, invs: InvariantSet| {
         let root = Skuld
             .sign_root(
                 SubjectId::new(PRINCIPAL),
@@ -129,7 +132,7 @@ fn build_fixtures() -> Fixtures {
                 invs,
                 Nonce(1),
                 far,
-                &a,
+                kp,
             )
             .expect("sign root");
         IntentProvenanceChain::new(root)
@@ -144,7 +147,7 @@ fn build_fixtures() -> Fixtures {
             InvariantSet::new([]),
             Nonce(1),
             far,
-            &a,
+            &mut a,
         )
         .expect("sign root_wr");
     let att_b = Attestation {
@@ -160,7 +163,7 @@ fn build_fixtures() -> Fixtures {
             IntentScope::new([cap("read")]),
             Vec::new(),
             InvariantSet::new([]),
-            &b,
+            &mut b,
             Timestamp(1000),
         )
         .expect("attenuate to two_hop");
@@ -168,17 +171,28 @@ fn build_fixtures() -> Fixtures {
     Fixtures {
         a_pub,
         b_pub,
-        legit: sign(IntentScope::new([cap("write")]), InvariantSet::new([])),
+        legit: sign(
+            &mut a,
+            IntentScope::new([cap("write")]),
+            InvariantSet::new([]),
+        ),
         scope_wre: sign(
+            &mut a,
             IntentScope::new([cap("write"), cap("read"), cap("exec")]),
             InvariantSet::new([]),
         ),
         trivial_inv: sign(
+            &mut a,
             IntentScope::new([cap("write")]),
             InvariantSet::new([inv("no-network")]),
         ),
-        read_signed: sign(IntentScope::new([cap("read")]), InvariantSet::new([])),
+        read_signed: sign(
+            &mut a,
+            IntentScope::new([cap("read")]),
+            InvariantSet::new([]),
+        ),
         violated_inv: sign(
+            &mut a,
             IntentScope::new([cap("write")]),
             InvariantSet::new([inv("no-write")]),
         ),
@@ -398,7 +412,8 @@ fn build(
         }),
         Box::new(NoSignals),
         dap(),
-    );
+    )
+    .with_guards(Guards::permissive());
     (
         orch,
         Spies {

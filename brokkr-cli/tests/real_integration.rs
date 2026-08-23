@@ -236,7 +236,7 @@ fn real_governed_hop_writes_a_file_with_real_pqc() {
     let _ = std::fs::remove_file(&path); // start clean
 
     // --- real PQC keys ---
-    let principal_kp = DualKeyPair::generate().expect("principal keypair");
+    let mut principal_kp = DualKeyPair::generate().expect("principal keypair");
     let saga_kp = DualKeyPair::generate().expect("saga keypair");
     let heimdall_kp = DualKeyPair::generate().expect("heimdall keypair");
     let barrier_kp = DualKeyPair::generate().expect("barrier keypair");
@@ -257,7 +257,7 @@ fn real_governed_hop_writes_a_file_with_real_pqc() {
             InvariantSet::new([]), // no invariants → conjunct 4 has nothing to check
             Nonce(1),
             Timestamp(9_000_000), // expiry well after `now`
-            &principal_kp,
+            &mut principal_kp,
         )
         .expect("sign root intent");
     let chain = IntentProvenanceChain::new(root);

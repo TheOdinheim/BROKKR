@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use brokkr_audit::AuditEvent;
 use brokkr_cli::{
-    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, HopRequest, HopResult, Orchestrator,
-    Sentinel, SignalRouter,
+    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, Guards, HopRequest, HopResult,
+    Orchestrator, Sentinel, SignalRouter,
 };
 use brokkr_core::barrier::{
     Barrier, BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryFlow, Destination,
@@ -389,7 +389,8 @@ fn build(cfg: Cfg) -> Rig {
             routed: routed.clone(),
         }),
         dap(),
-    );
+    )
+    .with_guards(Guards::permissive());
 
     Rig {
         bifrost,

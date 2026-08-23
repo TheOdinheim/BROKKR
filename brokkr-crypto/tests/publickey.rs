@@ -10,7 +10,7 @@ const MSG: &[u8] = b"BROKKR M-8 public-roots-of-trust verification";
 
 #[test]
 fn test_oqgf_m_8_public_key_only_verification() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let sig = kp.sign_dual(MSG).unwrap();
 
     // A signer publishes only its public keys.
@@ -33,7 +33,7 @@ fn test_oqgf_m_8_public_key_only_verification() {
 
 #[test]
 fn test_wrong_public_key_fails() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let sig = kp.sign_dual(MSG).unwrap();
 
     // A DIFFERENT keypair's public bytes must not verify kp's signature.
@@ -48,7 +48,7 @@ fn test_wrong_public_key_fails() {
 
 #[test]
 fn test_oqgf_r_1_both_families_required() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let (m, s) = kp.public_key_bytes().unwrap();
     let pubkey = DualPublicKey::from_public_bytes(&m, &s).unwrap();
 
@@ -90,7 +90,7 @@ fn test_tampered_public_key_fails_verification() {
     // in the *middle* of a public key (keeping its length valid) must never produce an
     // import that then verifies the intact signature — the key analog of the Phase 3
     // narrowing-scope M-9 tamper proof, which a fresh-different-keypair test cannot catch.
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let sig = kp.sign_dual(MSG).unwrap();
     let (mldsa_pub, slhdsa_pub) = kp.public_key_bytes().unwrap();
 

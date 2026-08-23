@@ -123,7 +123,11 @@ struct SagaState {
 
 /// The Audit Spine.
 pub struct Saga {
-    signer: DualKeyPair,
+    /// The audit-signing keypair. Behind a `Mutex` (13-FIX F-4): `sign_dual` is now `&mut self`,
+    /// and `DualKeyPair` is no longer `Sync`, so a `&self` method (`append`, `resign`, `export`)
+    /// obtains exclusive access by locking. The `Mutex<DualKeyPair>` is `Sync` (the keypair is
+    /// `Send`), so `Saga` stays `Sync`.
+    signer: Mutex<DualKeyPair>,
     generation: CryptoGeneration,
     genesis: Digest,
     tsa: Option<Box<dyn TimestampAuthority>>,
@@ -149,7 +153,7 @@ impl Saga {
             next_acceptance: 0,
         };
         Ok(Saga {
-            signer,
+            signer: Mutex::new(signer),
             generation,
             genesis,
             tsa,
@@ -176,7 +180,7 @@ impl Saga {
             next_acceptance: 0,
         };
         Saga {
-            signer,
+            signer: Mutex::new(signer),
             generation,
             genesis,
             tsa,
@@ -189,9 +193,15 @@ impl Saga {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Exclusive access to the signing keypair (13-FIX F-4). Always lock `state` before `signer`
+    /// where both are needed, to keep a consistent lock order.
+    fn signer(&self) -> std::sync::MutexGuard<'_, DualKeyPair> {
+        self.signer.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// The exporter's / signer's public bytes, for a recipient to verify records or exports.
     pub fn signer_public(&self) -> Result<PublicBytes, SagaError> {
-        self.signer.public_key_bytes().map_err(SagaError::Crypto)
+        self.signer().public_key_bytes().map_err(SagaError::Crypto)
     }
 
     /// Append a new record: `seq` increments, `prev` is the digest of the previous record's
@@ -221,7 +231,10 @@ impl Saga {
         };
 
         let signed = canonical::record_signed_content(&record);
-        let signature = self.signer.sign_dual(&signed).map_err(SagaError::Crypto)?;
+        let signature = self
+            .signer()
+            .sign_dual(&signed)
+            .map_err(SagaError::Crypto)?;
         record.signatures.push(GenerationSignature {
             generation: self.generation,
             signed_at: at,
@@ -295,7 +308,7 @@ impl Saga {
         &self,
         seq: u64,
         generation: CryptoGeneration,
-        new_signer: &DualKeyPair,
+        new_signer: &mut DualKeyPair,
         at: Timestamp,
     ) -> Result<(), SagaError> {
         let idx = usize::try_from(seq).map_err(|_| SagaError::NoSuchRecord)?;
@@ -338,8 +351,11 @@ impl Saga {
     pub fn export(&self) -> Result<SignedExport, SagaError> {
         let records = self.state().records.clone();
         let bytes = canonical::export_signed_content(&records);
-        let signature = self.signer.sign_dual(&bytes).map_err(SagaError::Crypto)?;
-        let signer_public = self.signer.public_key_bytes().map_err(SagaError::Crypto)?;
+        let signature = self.signer().sign_dual(&bytes).map_err(SagaError::Crypto)?;
+        let signer_public = self
+            .signer()
+            .public_key_bytes()
+            .map_err(SagaError::Crypto)?;
         Ok(SignedExport {
             records,
             signer_public,
@@ -439,7 +455,7 @@ impl Saga {
         // Fail-closed on the unreachable signing-error path (mirrors `Sha384Hasher`): an
         // empty-bytes signature is obviously invalid and never a fabricated valid one. The
         // alarm is still raised by returning the Signal.
-        if let Ok(sig) = self.signer.sign_dual(&body) {
+        if let Ok(sig) = self.signer().sign_dual(&body) {
             signal.signature = sig;
         }
         signal

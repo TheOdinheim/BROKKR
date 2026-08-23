@@ -192,7 +192,7 @@ fn full_cycle_with_a_real_model() {
     let _ = std::fs::remove_file(TARGET_PATH);
 
     // --- real keys + a real signed Root Intent (scope: write) ---
-    let principal_kp = DualKeyPair::generate().expect("principal keypair");
+    let mut principal_kp = DualKeyPair::generate().expect("principal keypair");
     let saga_kp = DualKeyPair::generate().expect("saga keypair");
     let heimdall_kp = DualKeyPair::generate().expect("heimdall keypair");
     let barrier_kp = DualKeyPair::generate().expect("barrier keypair");
@@ -209,7 +209,7 @@ fn full_cycle_with_a_real_model() {
             InvariantSet::new([]),
             Nonce(1),
             Timestamp(9_000_000),
-            &principal_kp,
+            &mut principal_kp,
         )
         .expect("sign root");
     let chain = IntentProvenanceChain::new(root);

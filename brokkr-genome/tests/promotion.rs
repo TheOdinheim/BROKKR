@@ -126,7 +126,7 @@ impl Parts {
     /// Build every register, sign each register's content, then assemble the genome and
     /// sign it (the genome signature covers the registers' real signatures — so registers
     /// are signed first).
-    fn sign(self, kp: &DualKeyPair) -> Genome {
+    fn sign(self, kp: &mut DualKeyPair) -> Genome {
         let mut tools = ToolGenome {
             entries: self.tool_entries,
             signature: dummy_sig(),
@@ -211,8 +211,8 @@ fn blocked_findings(v: PromotionVerdict) -> Vec<Finding> {
 
 #[test]
 fn test_oqgf_g_4_valid_genome_promotes() {
-    let kp = DualKeyPair::generate().unwrap();
-    let genome = Parts::default_valid().sign(&kp);
+    let mut kp = DualKeyPair::generate().unwrap();
+    let genome = Parts::default_valid().sign(&mut kp);
     assert_eq!(
         promote(&genome, &public_of(&kp), Timestamp(NOW)),
         PromotionVerdict::Promoted,
@@ -221,8 +221,8 @@ fn test_oqgf_g_4_valid_genome_promotes() {
 
 #[test]
 fn test_canonical_deterministic_and_unambiguous() {
-    let kp = DualKeyPair::generate().unwrap();
-    let genome = Parts::default_valid().sign(&kp);
+    let mut kp = DualKeyPair::generate().unwrap();
+    let genome = Parts::default_valid().sign(&mut kp);
 
     // Deterministic: the same value encodes to identical bytes.
     assert_eq!(
@@ -265,7 +265,7 @@ fn test_domain_separation_across_registers() {
 
     // The strong form: sign the tools bytes, then confirm that signature does not verify
     // against the roots bytes.
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let sig = kp.sign_dual(&tools_bytes).unwrap();
     let pk = public_of(&kp);
     assert!(pk.verify_dual(&tools_bytes, &sig).is_ok());
@@ -279,8 +279,8 @@ fn test_domain_separation_across_registers() {
 
 #[test]
 fn test_oqgf_g_4_tampered_register_fails_signature() {
-    let kp = DualKeyPair::generate().unwrap();
-    let mut genome = Parts::default_valid().sign(&kp);
+    let mut kp = DualKeyPair::generate().unwrap();
+    let mut genome = Parts::default_valid().sign(&mut kp);
     // Mutate the tools register AFTER signing — its signature no longer covers the content.
     genome.tools.entries.push(ToolEntry {
         id: ToolId::new("sneaky"),
@@ -302,23 +302,23 @@ fn test_oqgf_g_4_tampered_register_fails_signature() {
 
 #[test]
 fn test_oqgf_g_4_disallowed_algorithm_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // Put a disallowed algorithm into the CBOM inventory.
     let ecdsa = AlgorithmId::Signature(SignatureAlg::EcdsaP256);
     parts.cbom_algorithms.push(ecdsa);
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::DisallowedAlgorithm { algorithm: ecdsa }));
 }
 
 #[test]
 fn test_oqgf_m_6_stale_trust_score_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // reviewed more than 90 days before now.
     parts.endpoints = vec![endpoint("mimir-1", NOW - NINETY_DAYS_MS - 1)];
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::StaleTrustScore {
         endpoint: ModelEndpointId::new("mimir-1")
@@ -327,11 +327,11 @@ fn test_oqgf_m_6_stale_trust_score_blocks() {
 
 #[test]
 fn test_oqgf_m_6_future_trust_score_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // reviewed AFTER now — malformed.
     parts.endpoints = vec![endpoint("mimir-1", NOW + 1000)];
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::FutureTrustScore {
         endpoint: ModelEndpointId::new("mimir-1")
@@ -340,11 +340,11 @@ fn test_oqgf_m_6_future_trust_score_blocks() {
 
 #[test]
 fn test_tool_capability_not_in_vocabulary_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // A typo: the tool requires "wirte", which is not in the vocabulary.
     parts.tool_entries[0].required_capabilities = vec![cap("wirte")];
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::ToolCapabilityNotInVocabulary {
         tool: ToolId::new("write_file"),
@@ -354,11 +354,11 @@ fn test_tool_capability_not_in_vocabulary_blocks() {
 
 #[test]
 fn test_invariant_forbids_unknown_capability_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // An invariant forbidding a capability absent from the vocabulary (a typo).
     parts.policy_invariants[0].forbids_capabilities = vec![cap("netwrok")];
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(
         findings.contains(&Finding::InvariantForbidsUnknownCapability {
@@ -370,12 +370,12 @@ fn test_invariant_forbids_unknown_capability_blocks() {
 
 #[test]
 fn test_invariant_forbidding_nothing_blocks() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     // An invariant that forbids neither a capability nor a privilege — can never fire.
     parts.policy_invariants[0].forbids_capabilities = vec![];
     parts.policy_invariants[0].forbids_privilege = vec![];
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::InvariantForbidsNothing {
         invariant: Invariant::new("no-network-egress"),
@@ -387,14 +387,14 @@ fn test_invariant_forbidding_undeclared_but_known_capability_promotes() {
     // The Rev 1.5 narrowing: an invariant forbidding a RECOGNIZED capability that no tool
     // currently requires is valid forward-looking policy and SHALL NOT block. "read" is in
     // the vocabulary; no tool requires it; forbidding it is legitimate.
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     parts.policy_invariants.push(InvariantEntry {
         invariant: Invariant::new("no-read"),
         forbids_capabilities: vec![cap("read")],
         forbids_privilege: vec![],
     });
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     assert_eq!(
         promote(&genome, &public_of(&kp), Timestamp(NOW)),
         PromotionVerdict::Promoted,
@@ -405,7 +405,7 @@ fn test_invariant_forbidding_undeclared_but_known_capability_promotes() {
 #[test]
 fn test_all_findings_returned() {
     // A genome failing MULTIPLE predicates returns ALL of them, not just the first.
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let mut parts = Parts::default_valid();
     parts
         .cbom_algorithms
@@ -417,7 +417,7 @@ fn test_all_findings_returned() {
         forbids_capabilities: vec![],
         forbids_privilege: vec![],
     }); // predicate 6
-    let genome = parts.sign(&kp);
+    let genome = parts.sign(&mut kp);
     let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
     assert!(findings.contains(&Finding::DisallowedAlgorithm {
         algorithm: AlgorithmId::Signature(SignatureAlg::EcdsaP256)
@@ -442,8 +442,8 @@ fn test_all_findings_returned() {
 fn test_wrong_dap_key_blocks_all_signatures() {
     // Non-circularity: a valid genome verified with a DIFFERENT DAP key fails every
     // signature predicate — the verifying key is the caller's, not read from the genome.
-    let kp = DualKeyPair::generate().unwrap();
-    let genome = Parts::default_valid().sign(&kp);
+    let mut kp = DualKeyPair::generate().unwrap();
+    let genome = Parts::default_valid().sign(&mut kp);
     let wrong = public_of(&DualKeyPair::generate().unwrap());
     let findings = blocked_findings(promote(&genome, &wrong, Timestamp(NOW)));
     assert!(findings.contains(&Finding::GenomeSignatureInvalid));

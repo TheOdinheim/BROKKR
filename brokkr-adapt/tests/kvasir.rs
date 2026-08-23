@@ -153,7 +153,7 @@ fn provenance(
     corpus_version: &str,
     screen_version: &str,
     produced_at: u64,
-    signer: &DualKeyPair,
+    signer: &mut DualKeyPair,
 ) -> DetectorProvenance {
     let mut p = DetectorProvenance {
         seeding: IncidentId::new(seeding),
@@ -282,7 +282,7 @@ fn corpus_arg(v: &str) -> EvaluationCorpus {
 
 #[test]
 fn test_full_pipeline_activates_and_returns_prior_generation() {
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let s = valid_setup(&dap_kp);
     let k = s.kvasir();
 
@@ -297,7 +297,7 @@ fn test_full_pipeline_activates_and_returns_prior_generation() {
     assert_eq!(pass.version, CorpusVersion::new("corpus-v1"));
     assert_eq!(pass.produced_at, Timestamp(500));
 
-    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &dap_kp);
+    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &mut dap_kp);
     let prior = k
         .activate(detector, prov, Timestamp(9_000))
         .expect("a screened, DAP-approved, current candidate activates");
@@ -424,7 +424,7 @@ fn test_oqgf_p_6_3_raises_host_harm_refused() {
     // A candidate with REAL detection gains (it passes selection) is STILL discarded because it
     // raises host harm — it fires on a legitimate Self Set action. There is no trade: the gain
     // does not buy tolerance for the harm.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let mut s = valid_setup(&dap_kp);
     // The candidate catches the attack (gain) AND fires on the legitimate Self Set action (harm).
     s.candidate = fires("cand", vec!["attack-1", "legit-1"]);
@@ -446,7 +446,7 @@ fn test_oqgf_p_6_3_raises_host_harm_refused() {
         "the candidate has real, selectable detection gains"
     );
     // Activation discards it anyway: host harm, regardless of the gain.
-    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &dap_kp);
+    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &mut dap_kp);
     assert_eq!(
         k.activate(detector, prov, Timestamp(9_000)),
         Err(AdaptError::FailsTolerance)
@@ -458,11 +458,11 @@ fn test_oqgf_p_6_3_stale_screen_pass_refused() {
     // A screen pass against a SUPERSEDED Self Set version is refused however recent it is —
     // version equality, not recency (§6.12). The provenance is validly signed; only its screen
     // version is stale.
-    let dap_kp = DualKeyPair::generate().unwrap();
+    let mut dap_kp = DualKeyPair::generate().unwrap();
     let s = valid_setup(&dap_kp);
     let detector = RefinedDetector::new(s.base.clone(), s.delta.clone(), s.generation);
     // produced_at is recent, but the version is a superseded Self Set.
-    let prov = provenance("inc-1", "corpus-v1", "selfset-v0-OLD", 8_999, &dap_kp);
+    let prov = provenance("inc-1", "corpus-v1", "selfset-v0-OLD", 8_999, &mut dap_kp);
     assert_eq!(
         s.kvasir().activate(detector, prov, Timestamp(9_000)),
         Err(AdaptError::FailsTolerance)
@@ -475,10 +475,10 @@ fn test_oqgf_p_6_3_stale_screen_pass_refused() {
 fn test_oqgf_p_6_6_activation_without_dap_approval_refused() {
     // A provenance signed by a key that is NOT the declared DAP's has no valid approval.
     let dap_kp = DualKeyPair::generate().unwrap();
-    let impostor = DualKeyPair::generate().unwrap();
+    let mut impostor = DualKeyPair::generate().unwrap();
     let s = valid_setup(&dap_kp);
     let detector = RefinedDetector::new(s.base.clone(), s.delta.clone(), s.generation);
-    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &impostor);
+    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &mut impostor);
     assert_eq!(
         s.kvasir().activate(detector, prov, Timestamp(9_000)),
         Err(AdaptError::NeedsApproval)
@@ -531,8 +531,8 @@ fn test_adapt_domain_separated_from_all_siblings() {
 
     // And a real provenance encoding actually begins with the adapt provenance tag
     // (length-prefixed), so the domain separation is in the bytes, not just the constants.
-    let dap_kp = DualKeyPair::generate().unwrap();
-    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &dap_kp);
+    let mut dap_kp = DualKeyPair::generate().unwrap();
+    let prov = provenance("inc-1", "corpus-v1", "selfset-v1", 500, &mut dap_kp);
     let encoded = provenance_signed_content(&prov);
     let mut expected = (DOMAIN_PROVENANCE.len() as u64).to_be_bytes().to_vec();
     expected.extend_from_slice(DOMAIN_PROVENANCE);

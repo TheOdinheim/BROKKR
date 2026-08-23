@@ -18,8 +18,8 @@ use std::thread;
 
 use brokkr_audit::{AuditEvent, ProposalRecord};
 use brokkr_cli::{
-    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, HopRequest, HopResult, Orchestrator,
-    Sentinel, SignalRouter,
+    AuditSink, DenialStage, GenomeCheck, GenomeRefusal, Guards, HopRequest, HopResult,
+    Orchestrator, RateLimit, Sentinel, SignalRouter,
 };
 use brokkr_core::barrier::{BarrierVerdict, BoundaryFlow, Destination};
 use brokkr_core::classification::{Classification, NamedGroup};
@@ -74,9 +74,9 @@ fn fx() -> &'static Fixtures {
 }
 
 fn build_fixtures() -> Fixtures {
-    let a = DualKeyPair::generate().expect("A keypair");
+    let mut a = DualKeyPair::generate().expect("A keypair");
     let a_pub = a.public_key_bytes().expect("A public");
-    let sign = |scope: IntentScope, invs: InvariantSet, expiry: Timestamp| {
+    let sign = |kp: &mut DualKeyPair, scope: IntentScope, invs: InvariantSet, expiry: Timestamp| {
         let root = Skuld
             .sign_root(
                 SubjectId::new(PRINCIPAL),
@@ -85,25 +85,33 @@ fn build_fixtures() -> Fixtures {
                 invs,
                 Nonce(1),
                 expiry,
-                &a,
+                kp,
             )
             .expect("sign root");
         IntentProvenanceChain::new(root)
     };
     Fixtures {
         a_pub,
-        legit: sign(IntentScope::new([cap("write")]), InvariantSet::new([]), FAR),
+        legit: sign(
+            &mut a,
+            IntentScope::new([cap("write")]),
+            InvariantSet::new([]),
+            FAR,
+        ),
         expire_1000: sign(
+            &mut a,
             IntentScope::new([cap("write")]),
             InvariantSet::new([]),
             Timestamp(1000),
         ),
         xyzzy_scope: sign(
+            &mut a,
             IntentScope::new([cap("write"), cap("xyzzy_nonexistent")]),
             InvariantSet::new([]),
             FAR,
         ),
         empty_inv: sign(
+            &mut a,
             IntentScope::new([cap("write")]),
             InvariantSet::new([inv("")]),
             FAR,
@@ -295,7 +303,8 @@ fn build(genome: TestGenome, tool: &str, detail: &str, rationale: &str) -> (Orch
         }),
         Box::new(NoSignals),
         dap(),
-    );
+    )
+    .with_guards(Guards::permissive());
     (
         orch,
         Spies {
@@ -400,17 +409,23 @@ fn attack_1_3_clock_exactly_at_expiry() {
 /// 1.4 — clock goes backward between hops. Each hop evaluates independently; neither the
 /// orchestrator nor SAGA enforces monotonic time. Documented (F-9).
 #[test]
-fn attack_1_4_clock_goes_backward() {
+fn attack_1_4_clock_goes_backward_is_rejected_after_fix() {
+    // 13-FIX F-9: enable the monotonic-time guard (it is checked first, before replay/rate).
     let (orch, spies) = write_orch("/tmp/x");
+    let orch = orch.with_guards(Guards {
+        monotonic_time: true,
+        replay_guard: false,
+        rate_limit: None,
+        uniform_denial_stage: false,
+    });
     let r1 = orch.execute_hop(req(fx().legit.clone()), Timestamp(5000));
     let r2 = orch.execute_hop(req(fx().legit.clone()), Timestamp(100)); // time went backward
-    assert!(matches!(r1, HopResult::Executed { .. }));
-    assert!(
-        matches!(r2, HopResult::Executed { .. }),
-        "backward time still granted: {r2:?}"
-    );
-    // SAGA recorded both, with no ordering complaint. The out-of-order `at` is accepted silently.
-    assert_eq!(spies.tool.count(), 2);
+    assert!(matches!(r1, HopResult::Executed { .. }), "{r1:?}");
+    match &r2 {
+        HopResult::Error { detail } => assert!(detail.contains("non-monotonic"), "{detail}"),
+        other => panic!("expected non-monotonic error, got {other:?}"),
+    }
+    assert_eq!(spies.tool.count(), 1, "only the forward-time hop executed");
 }
 
 /// 1.5 — TOCTOU: `now` is per-call and frozen for the whole hop (I-13). Real wall-clock elapsed
@@ -449,13 +464,37 @@ fn attack_2_1_same_capability_escalating_targets() {
 
 /// 2.2 — 50 identical hops. No per-hop rate limiting; all succeed. Documented (F-7).
 #[test]
-fn attack_2_2_no_rate_limiting() {
+fn attack_2_2_rate_limit_enforced_after_fix() {
+    // 13-FIX F-7: enable a rate limit of 5 per 60 s (replay off — the test reuses one chain by
+    // design, to isolate the rate limiter). The 6th hop within the window is denied.
     let (orch, spies) = write_orch("/tmp/x");
-    for _ in 0..50 {
-        let r = orch.execute_hop(req(fx().legit.clone()), Timestamp(1000));
-        assert!(matches!(r, HopResult::Executed { .. }));
+    let orch = orch.with_guards(Guards {
+        rate_limit: Some(RateLimit {
+            max: 5,
+            window_ms: 60_000,
+        }),
+        replay_guard: false,
+        monotonic_time: false,
+        uniform_denial_stage: false,
+    });
+    let mut denied = 0;
+    for _ in 0..6 {
+        match orch.execute_hop(req(fx().legit.clone()), Timestamp(1000)) {
+            HopResult::Executed { .. } => {}
+            HopResult::Denied { stage, reason } => {
+                assert_eq!(stage, DenialStage::Gate);
+                assert!(reason.contains("rate limit"), "{reason}");
+                denied += 1;
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
-    assert_eq!(spies.tool.count(), 50, "all 50 executed — no rate limit");
+    assert_eq!(
+        spies.tool.count(),
+        5,
+        "exactly 5 hops executed within the window"
+    );
+    assert_eq!(denied, 1, "the 6th hop was rate-limited");
 }
 
 /// 2.3 — alternating safe/dangerous targets. HEIMDALL receives a Hop observation for each, but
@@ -530,11 +569,19 @@ fn attack_3_3_control_characters_in_rationale() {
     let r = orch.execute_hop(req(fx().legit.clone()), Timestamp(1000));
     assert!(matches!(r, HopResult::Executed { .. }));
     let p = proposals(&spies);
-    assert_eq!(
-        p[0].explanation, evil,
-        "recorded verbatim incl. NUL and ESC"
+    // 13-FIX F-8: the audit copy is sanitized — no NUL, no ANSI escape reaches the record. The ANSI
+    // CSI (`\x1b[31m`) is dropped whole; the surrounding text survives.
+    assert!(!p[0].explanation.contains('\u{0}'), "NUL stripped");
+    assert!(!p[0].explanation.contains('\u{1b}'), "ESC stripped");
+    assert!(
+        !p[0].explanation.contains("[31m"),
+        "ANSI CSI sequence dropped"
     );
-    assert!(p[0].explanation.contains('\u{0}') && p[0].explanation.contains('\u{1b}'));
+    assert!(
+        p[0].explanation.contains("normal text") && p[0].explanation.contains("red text"),
+        "surrounding text preserved: {:?}",
+        p[0].explanation
+    );
 }
 
 // ======================================================================================

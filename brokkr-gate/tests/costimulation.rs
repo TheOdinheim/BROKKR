@@ -100,7 +100,7 @@ fn declare(reg: RegistryResolver, p: &Party) -> RegistryResolver {
 /// A signed 2-hop chain: root(principal) {read,write,exec} -> hop1 {read,write} ->
 /// hop2 {read}, expiry 10_000. Each hop's `hop_identity.subject` matches the keypair that
 /// signs its entry, so a resolver declaring all three verifies it.
-fn signed_2hop(principal: &Party, hop1: &Party, hop2: &Party) -> IntentProvenanceChain {
+fn signed_2hop(principal: &mut Party, hop1: &mut Party, hop2: &mut Party) -> IntentProvenanceChain {
     let root = Skuld
         .sign_root(
             principal.subject.clone(),
@@ -109,7 +109,7 @@ fn signed_2hop(principal: &Party, hop1: &Party, hop2: &Party) -> IntentProvenanc
             invs(&["no-network-egress"]),
             Nonce(42),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
@@ -120,7 +120,7 @@ fn signed_2hop(principal: &Party, hop1: &Party, hop2: &Party) -> IntentProvenanc
             scope(&["read", "write"]),
             vec![],
             invs(&["read-only-outside-src"]),
-            &hop1.kp,
+            &mut hop1.kp,
             Timestamp(100),
         )
         .unwrap();
@@ -131,7 +131,7 @@ fn signed_2hop(principal: &Party, hop1: &Party, hop2: &Party) -> IntentProvenanc
             scope(&["read"]),
             vec![],
             InvariantSet::default(),
-            &hop2.kp,
+            &mut hop2.kp,
             Timestamp(200),
         )
         .unwrap()
@@ -223,7 +223,7 @@ impl GenomeResolver for MockGenome {
 /// A signed root-only chain with an exact current scope and invariant set — the smallest chain
 /// that passes Signals 1 and 2 (the identity binds to `principal`) while letting each conjunct-3/4
 /// test control precisely what the gate checks.
-fn root_chain(principal: &Party, caps: &[&str], invariants: &[&str]) -> IntentProvenanceChain {
+fn root_chain(principal: &mut Party, caps: &[&str], invariants: &[&str]) -> IntentProvenanceChain {
     let root = Skuld
         .sign_root(
             principal.subject.clone(),
@@ -232,7 +232,7 @@ fn root_chain(principal: &Party, caps: &[&str], invariants: &[&str]) -> IntentPr
             invs(invariants),
             Nonce(1),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     IntentProvenanceChain::new(root)
@@ -242,8 +242,8 @@ fn root_chain(principal: &Party, caps: &[&str], invariants: &[&str]) -> IntentPr
 
 #[test]
 fn test_oqgf_m_11_valid_costimulation_grants() {
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2);
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2);
     let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // Signal 1 identity is the final hop (hop-2), which binds to the chain's last entry.
@@ -265,7 +265,7 @@ fn test_oqgf_m_11_valid_costimulation_grants() {
 
 #[test]
 fn test_root_only_chain_binds_to_principal() {
-    let principal = party("principal");
+    let mut principal = party("principal");
     let root = Skuld
         .sign_root(
             principal.subject.clone(),
@@ -274,7 +274,7 @@ fn test_root_only_chain_binds_to_principal() {
             invs(&["no-network-egress"]),
             Nonce(7),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root); // no entries
@@ -296,8 +296,8 @@ fn test_root_only_chain_binds_to_principal() {
 
 #[test]
 fn test_oqgf_m_11_undeclared_identity_is_anergy() {
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2);
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2);
     let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // A subject the registry does not declare: resolution returns None.
@@ -318,8 +318,8 @@ fn test_oqgf_m_11_identity_does_not_bind_is_anergy() {
     // ends in B (hop-2, also declared). Signal 1 must still refuse, because A is not the
     // hop the chain proves. Presenting any declared identity alongside someone else's chain
     // does not satisfy Signal 1.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2);
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2);
     let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     // hop-1: declared, resolves, but not the final hop the chain proves.
@@ -331,7 +331,7 @@ fn test_oqgf_m_11_identity_does_not_bind_is_anergy() {
 
 #[test]
 fn test_root_only_chain_wrong_principal_is_anergy() {
-    let principal = party("principal");
+    let mut principal = party("principal");
     let other = party("other"); // declared, but not the root principal
     let root = Skuld
         .sign_root(
@@ -341,7 +341,7 @@ fn test_root_only_chain_wrong_principal_is_anergy() {
             InvariantSet::default(),
             Nonce(7),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
@@ -369,8 +369,8 @@ fn test_oqgf_m_14_i13_expiry_is_evaluated_against_call_time_not_a_held_clock() {
     // the time at construction and never advanced it, it shared the defect's assumption and
     // could not distinguish a stale held clock from a per-call one. It passed on the held
     // clock precisely because it agreed with it.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2); // expiry 10_000
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2); // expiry 10_000
     let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
     let identity = attn(&hop2.subject);
 
@@ -395,7 +395,7 @@ fn test_tampered_entry_signature_is_anergy() {
     // push a hop-2 entry via `extend` (subset-guarded, NOT signature-guarded) with the
     // CORRECT hash link but a WRONG signature. Signal 2 -> EntrySignatureInvalid ->
     // ChainInvalid.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let (mut principal, mut hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let root = Skuld
         .sign_root(
             principal.subject.clone(),
@@ -404,7 +404,7 @@ fn test_tampered_entry_signature_is_anergy() {
             InvariantSet::default(),
             Nonce(1),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
@@ -415,7 +415,7 @@ fn test_tampered_entry_signature_is_anergy() {
             scope(&["read", "write"]),
             vec![],
             InvariantSet::default(),
-            &hop1.kp,
+            &mut hop1.kp,
             Timestamp(100),
         )
         .unwrap();
@@ -446,7 +446,7 @@ fn test_broken_hash_link_is_anergy() {
     // Another ChainInvalid case: push hop-2 via `extend` with a WRONG received_digest.
     // Signal 2 -> BrokenLink -> ChainInvalid (the hash link is checked before the
     // signature). This also confirms WouldBroaden is not the only route to ChainInvalid.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let (mut principal, mut hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
     let root = Skuld
         .sign_root(
             principal.subject.clone(),
@@ -455,7 +455,7 @@ fn test_broken_hash_link_is_anergy() {
             InvariantSet::default(),
             Nonce(1),
             Timestamp(10_000),
-            &principal.kp,
+            &mut principal.kp,
         )
         .unwrap();
     let chain = IntentProvenanceChain::new(root);
@@ -466,7 +466,7 @@ fn test_broken_hash_link_is_anergy() {
             scope(&["read", "write"]),
             vec![],
             InvariantSet::default(),
-            &hop1.kp,
+            &mut hop1.kp,
             Timestamp(100),
         )
         .unwrap();
@@ -496,8 +496,8 @@ fn test_broken_hash_link_is_anergy() {
 fn test_unresolvable_hop_is_anergy() {
     // A mid-chain hop (hop-1) is absent from the registry, while the presented identity
     // (hop-2) and the root are declared. Signal 1 passes; Signal 2 fails resolving hop-1.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2);
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2);
     // Declare principal and hop-2, but NOT hop-1.
     let reg = declare(declare(RegistryResolver::new(), &principal), &hop2);
     let sindri = Sindri::new(reg, PermissiveGenome);
@@ -516,8 +516,8 @@ fn test_i1_sindri_never_mints() {
     // no construction of it — and no OutOfScope/InvariantViolated path — is proven
     // structurally in the phase report.) Here we prove SINDRI routes a failure to Anergy
     // rather than a grant.
-    let (principal, hop1, hop2) = (party("principal"), party("hop-1"), party("hop-2"));
-    let chain = signed_2hop(&principal, &hop1, &hop2);
+    let (mut principal, mut hop1, mut hop2) = (party("principal"), party("hop-1"), party("hop-2"));
+    let chain = signed_2hop(&mut principal, &mut hop1, &mut hop2);
     let sindri = Sindri::new(registry_for(&principal, &hop1, &hop2), PermissiveGenome);
 
     let decision = sindri.authorize(
@@ -536,8 +536,8 @@ fn test_i1_sindri_never_mints() {
 
 #[test]
 fn tool_not_in_genome_yields_out_of_scope() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &[]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &[]);
     // Empty genome: resolve_tool("write") returns None — an undeclared tool is denied.
     let sindri = Sindri::new(
         declare(RegistryResolver::new(), &principal),
@@ -551,8 +551,8 @@ fn tool_not_in_genome_yields_out_of_scope() {
 
 #[test]
 fn tool_capability_missing_from_scope() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &[]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &[]);
     // Tool "write" requires the "write" capability; the chain's scope is {read}.
     let genome = MockGenome::default().with_tool("write", &["write"], PrivilegeClass::Unprivileged);
     let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
@@ -564,8 +564,8 @@ fn tool_capability_missing_from_scope() {
 
 #[test]
 fn tool_all_capabilities_in_scope_no_invariants() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read", "write"], &[]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read", "write"], &[]);
     // Tool requires "read" ⊆ {read, write}; no invariants → full grant.
     let genome = MockGenome::default().with_tool("write", &["read"], PrivilegeClass::Unprivileged);
     let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
@@ -581,8 +581,8 @@ fn tool_all_capabilities_in_scope_no_invariants() {
 
 #[test]
 fn invariant_with_no_predicate_yields_violated() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &["x"]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &["x"]);
     // The tool passes conjunct 3, but invariant "x" has no declared predicate → denied.
     let genome = MockGenome::default().with_tool("write", &[], PrivilegeClass::Unprivileged);
     let sindri = Sindri::new(declare(RegistryResolver::new(), &principal), genome);
@@ -594,9 +594,9 @@ fn invariant_with_no_predicate_yields_violated() {
 
 #[test]
 fn tool_requires_forbidden_capability() {
-    let principal = party("principal");
+    let mut principal = party("principal");
     // "network" is in scope so conjunct 3 passes and we reach conjunct 4.
-    let chain = root_chain(&principal, &["network"], &["no-network"]);
+    let chain = root_chain(&mut principal, &["network"], &["no-network"]);
     let genome = MockGenome::default()
         .with_tool("write", &["network"], PrivilegeClass::Unprivileged)
         .with_invariant("no-network", &["network"], &[]);
@@ -609,8 +609,8 @@ fn tool_requires_forbidden_capability() {
 
 #[test]
 fn tool_has_forbidden_privilege() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &["no-privileged"]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &["no-privileged"]);
     let genome = MockGenome::default()
         .with_tool("write", &[], PrivilegeClass::Privileged)
         .with_invariant("no-privileged", &[], &[PrivilegeClass::Privileged]);
@@ -623,8 +623,8 @@ fn tool_has_forbidden_privilege() {
 
 #[test]
 fn tool_passes_all_invariants() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &["no-network"]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &["no-network"]);
     let genome = MockGenome::default()
         .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
         .with_invariant("no-network", &["network"], &[]);
@@ -639,8 +639,12 @@ fn tool_passes_all_invariants() {
 
 #[test]
 fn multiple_invariants_all_pass() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &["no-network", "no-exec-outside"]);
+    let mut principal = party("principal");
+    let chain = root_chain(
+        &mut principal,
+        &["read"],
+        &["no-network", "no-exec-outside"],
+    );
     let genome = MockGenome::default()
         .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
         .with_invariant("no-network", &["network"], &[])
@@ -656,8 +660,8 @@ fn multiple_invariants_all_pass() {
 
 #[test]
 fn multiple_invariants_second_fails() {
-    let principal = party("principal");
-    let chain = root_chain(&principal, &["read"], &["no-network", "no-read"]);
+    let mut principal = party("principal");
+    let chain = root_chain(&mut principal, &["read"], &["no-network", "no-read"]);
     let genome = MockGenome::default()
         .with_tool("write", &["read"], PrivilegeClass::Unprivileged)
         // Passes: the tool needs "read", not "network".

@@ -63,7 +63,7 @@ fn tag() -> PersonalDataTag {
 /// A signed BCR. `authorized`/`classification`/`personal`/`expiry`/`datum` are the mutable
 /// axes the negatives perturb; the signature is real (over the canonical signed content).
 fn signed_bcr(
-    bcr_kp: &DualKeyPair,
+    bcr_kp: &mut DualKeyPair,
     datum: &str,
     classification: Classification,
     authorized: Vec<DestinationClass>,
@@ -87,7 +87,7 @@ fn signed_bcr(
 }
 
 fn signed_acceptance(
-    dap_kp: &DualKeyPair,
+    dap_kp: &mut DualKeyPair,
     finding: FindingId,
     gate: Option<DeterministicGateId>,
     expiry: u64,
@@ -156,12 +156,12 @@ fn assert_deny(v: BarrierVerdict, condition: BarrierCondition) {
 
 #[test]
 fn test_valid_above_public_egress_allows() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -234,13 +234,13 @@ fn test_condition_2_missing_bcr_above_public() {
 
 #[test]
 fn test_condition_3_datum_mismatch() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     // BCR covers "other", flow is "dep-1".
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "other",
         Classification::Secret,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -263,12 +263,12 @@ fn test_condition_3_datum_mismatch() {
 
 #[test]
 fn test_condition_4_bad_signature() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let mut bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -292,13 +292,13 @@ fn test_condition_4_bad_signature() {
 
 #[test]
 fn test_condition_5_expired() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     // expiry before now.
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -318,13 +318,13 @@ fn test_condition_5_expired() {
 
 #[test]
 fn test_condition_6_classification_mismatch() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     // BCR is for Internal, flow is Secret.
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Internal,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -347,13 +347,13 @@ fn test_condition_6_classification_mismatch() {
 
 #[test]
 fn test_condition_7_unauthorized_destination() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     // BCR authorizes a Network host, flow goes to a LocalPath.
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::Network {
@@ -378,7 +378,7 @@ fn test_condition_7_unauthorized_destination() {
 
 #[test]
 fn test_condition_8_channel_strength_collapse() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
@@ -388,7 +388,7 @@ fn test_condition_8_channel_strength_collapse() {
         channel: ChannelStrength::Classical,
     };
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::Network {
@@ -407,13 +407,13 @@ fn test_condition_8_channel_strength_collapse() {
 
 #[test]
 fn test_condition_9_personal_tag_absent_from_bcr() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     // Flow is personal; BCR carries no personal tag.
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "dep-1",
         Classification::Secret,
         vec![DestinationClass::LocalPath(ResourcePath::new("./out.txt"))],
@@ -452,31 +452,31 @@ fn ingress(
 
 #[test]
 fn test_provenanced_ingress_allows_in_both_contexts() {
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
-    let bcr = || {
-        signed_bcr(
-            &bcr_kp,
-            "in-1",
-            Classification::Secret,
-            vec![],
-            None,
-            NOW + 1000,
-        )
-    };
+    // Sign the BCR once (13-FIX F-4: signing is &mut, so the mutable borrow must end before the
+    // immutable borrow in `barrier(&bcr_kp, ...)`); reuse the value for both contexts.
+    let bcr = signed_bcr(
+        &mut bcr_kp,
+        "in-1",
+        Classification::Secret,
+        vec![],
+        None,
+        NOW + 1000,
+    );
     let b = barrier(&bcr_kp, &dap_kp, InMemoryAcceptances::new());
     assert_eq!(
         b.evaluate(
-            &ingress("in-1", None, Some(bcr()), ContextClass::Privileged),
+            &ingress("in-1", None, Some(bcr.clone()), ContextClass::Privileged),
             Timestamp(NOW)
         ),
         BarrierVerdict::Allow
     );
     assert_eq!(
         b.evaluate(
-            &ingress("in-1", None, Some(bcr()), ContextClass::NonPrivileged),
+            &ingress("in-1", None, Some(bcr), ContextClass::NonPrivileged),
             Timestamp(NOW)
         ),
         BarrierVerdict::Allow
@@ -523,12 +523,12 @@ fn test_oqgf_i_11_unprovenanced_into_privileged_quarantines() {
 fn test_personal_data_into_privileged_without_purpose_quarantines() {
     // Personal data into a Privileged Context needs a BCR carrying a matching personal tag.
     // Here provenance is established (valid BCR) but the BCR has no personal tag.
-    let (bcr_kp, dap_kp) = (
+    let (mut bcr_kp, dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let bcr = signed_bcr(
-        &bcr_kp,
+        &mut bcr_kp,
         "in-1",
         Classification::Secret,
         vec![],
@@ -562,13 +562,13 @@ fn missing_bcr_finding_id(datum: &str) -> FindingId {
 
 #[test]
 fn test_oqgf_p_9_2_matching_acceptance_yields_accepted_risk() {
-    let (bcr_kp, dap_kp) = (
+    let (bcr_kp, mut dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let fid = missing_bcr_finding_id("dep-1");
     let acceptance = signed_acceptance(
-        &dap_kp,
+        &mut dap_kp,
         fid.clone(),
         Some(DeterministicGateId::Barrier),
         NOW + 1000,
@@ -590,13 +590,13 @@ fn test_oqgf_p_9_2_matching_acceptance_yields_accepted_risk() {
 fn test_oqgf_p_9_2_acceptance_for_different_finding_does_not_apply() {
     // The acceptance names a DIFFERENT (datum, condition); the Deny stands. This is what
     // makes the acceptance scoped rather than blanket.
-    let (bcr_kp, dap_kp) = (
+    let (bcr_kp, mut dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let other = missing_bcr_finding_id("some-other-datum");
     let acceptance = signed_acceptance(
-        &dap_kp,
+        &mut dap_kp,
         other.clone(),
         Some(DeterministicGateId::Barrier),
         NOW + 1000,
@@ -613,13 +613,13 @@ fn test_oqgf_p_9_2_acceptance_for_different_finding_does_not_apply() {
 #[test]
 fn test_oqgf_p_9_3_expired_acceptance_reverts_to_deny() {
     // On expiry the finding reverts to blocking exactly as if no entry existed.
-    let (bcr_kp, dap_kp) = (
+    let (bcr_kp, mut dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let fid = missing_bcr_finding_id("dep-1");
     let acceptance = signed_acceptance(
-        &dap_kp,
+        &mut dap_kp,
         fid.clone(),
         Some(DeterministicGateId::Barrier),
         NOW - 1,
@@ -636,13 +636,13 @@ fn test_oqgf_p_9_3_expired_acceptance_reverts_to_deny() {
 #[test]
 fn test_acceptance_with_wrong_gate_does_not_apply() {
     // gate == Some(Genome), not Some(Barrier).
-    let (bcr_kp, dap_kp) = (
+    let (bcr_kp, mut dap_kp) = (
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
     let fid = missing_bcr_finding_id("dep-1");
     let acceptance = signed_acceptance(
-        &dap_kp,
+        &mut dap_kp,
         fid.clone(),
         Some(DeterministicGateId::Genome),
         NOW + 1000,
@@ -663,10 +663,10 @@ fn test_acceptance_with_bad_signature_does_not_apply() {
         DualKeyPair::generate().unwrap(),
         DualKeyPair::generate().unwrap(),
     );
-    let wrong_dap = DualKeyPair::generate().unwrap();
+    let mut wrong_dap = DualKeyPair::generate().unwrap();
     let fid = missing_bcr_finding_id("dep-1");
     let acceptance = signed_acceptance(
-        &wrong_dap,
+        &mut wrong_dap,
         fid.clone(),
         Some(DeterministicGateId::Barrier),
         NOW + 1000,
@@ -684,12 +684,19 @@ fn test_acceptance_with_bad_signature_does_not_apply() {
 
 #[test]
 fn test_bcr_and_acceptance_domain_separated() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let pk = DualPublicKey::from_public_bytes(&public_bytes(&kp).0, &public_bytes(&kp).1).unwrap();
 
-    let bcr = signed_bcr(&kp, "d", Classification::Secret, vec![], None, NOW + 1000);
+    let bcr = signed_bcr(
+        &mut kp,
+        "d",
+        Classification::Secret,
+        vec![],
+        None,
+        NOW + 1000,
+    );
     let acc = signed_acceptance(
-        &kp,
+        &mut kp,
         FindingId::new("f"),
         Some(DeterministicGateId::Barrier),
         NOW + 1000,

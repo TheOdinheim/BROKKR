@@ -83,7 +83,7 @@ pub struct Heimdall {
     /// The DAP public key tolerance grants are verified under (OQGF-P-4).
     dap_public: PublicBytes,
     /// HEIMDALL's own signing key, for the raise-only Signals it emits.
-    signing: DualKeyPair,
+    signing: std::sync::Mutex<DualKeyPair>,
     /// The DAP-declared host-harm ceiling (OQGF-P-1), injected — never inferred.
     bound: f64,
     /// The DAP-declared blast radius (OQGF-P-5b), injected. `None` = undeclared → storm
@@ -109,7 +109,7 @@ impl Heimdall {
         Heimdall {
             corpus,
             dap_public,
-            signing,
+            signing: std::sync::Mutex::new(signing),
             bound,
             blast_radius,
             sustained_threshold,
@@ -280,7 +280,12 @@ impl Heimdall {
             signature: empty_dual_signature(),
         };
         let body = canonical::signal_signed_content(&signal);
-        if let Ok(sig) = self.signing.sign_dual(&body) {
+        if let Ok(sig) = self
+            .signing
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .sign_dual(&body)
+        {
             signal.signature = sig;
         }
         signal

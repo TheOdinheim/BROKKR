@@ -99,20 +99,59 @@ impl Verifier for SlhDsaSigner {
 /// A dual-family keypair: ML-DSA-65 (lattice) **and** SLH-DSA-SHAKE-192s
 /// (hash-based). This is OQGF-R-1's dual PQC families for any signature relied on
 /// as legal evidence (SAGA's audit signatures at Enhanced).
+///
+/// **13-FIX F-4 — signing is `&mut self`, and the keypair is not `Sync`.** Concurrent signing on
+/// one keypair through a shared `&` raced on the wolfCrypt key/RNG state and silently corrupted
+/// signatures (red-team 13A F-4). Two structural fixes make that uncompilable rather than merely
+/// discouraged: [`sign_dual`](Self::sign_dual) now takes `&mut self` (a shared `&DualKeyPair`
+/// cannot sign at all), and the `PhantomData<Cell<()>>` marker removes the auto `Sync` impl (a
+/// `&DualKeyPair` cannot even cross a thread boundary). A holder that must sign from a `&self`
+/// method (SAGA, HEIMDALL) keeps the keypair behind a `Mutex`. Verification is unaffected — it uses
+/// a separate verify-only [`DualPublicKey`], which stays `Sync`.
 pub struct DualKeyPair {
     mldsa: ffi::MlDsa65,
     slhdsa: ffi::SlhDsaShake192s,
+    /// Removes the auto `Sync` impl (keeps `Send`): a signing keypair must not be shared across
+    /// threads. `Cell<()>` is `Send` but not `Sync`.
+    _no_sync: core::marker::PhantomData<core::cell::Cell<()>>,
 }
 
 impl DualKeyPair {
     pub fn generate() -> Result<Self, CryptoError> {
         let mldsa = ffi::MlDsa65::generate().map_err(|_| CryptoError::Backend)?;
         let slhdsa = ffi::SlhDsaShake192s::generate().map_err(|_| CryptoError::Backend)?;
-        Ok(DualKeyPair { mldsa, slhdsa })
+        Ok(DualKeyPair {
+            mldsa,
+            slhdsa,
+            _no_sync: core::marker::PhantomData,
+        })
     }
 
-    /// Sign under both families, producing a `DualSignature` that carries both.
-    pub fn sign_dual(&self, msg: &[u8]) -> Result<DualSignature, CryptoError> {
+    /// Sign under both families, producing a `DualSignature` that carries both. **`&mut self`
+    /// (13-FIX F-4):** signing mutates the underlying key/RNG state, so it requires exclusive
+    /// access — this makes concurrent signing through a shared reference a compile error.
+    ///
+    /// Signing through a shared `&DualKeyPair` does not compile (E0596) — the regression test for
+    /// 13A finding F-4 (concurrent signing on one keypair corrupted signatures):
+    ///
+    /// ```compile_fail,E0596
+    /// let kp = brokkr_crypto::DualKeyPair::generate().unwrap();
+    /// let shared: &brokkr_crypto::DualKeyPair = &kp;
+    /// let _ = shared.sign_dual(b"msg"); // cannot borrow `*shared` as mutable, behind a `&`
+    /// ```
+    ///
+    /// And a `&DualKeyPair` cannot cross a thread boundary — `DualKeyPair` is not `Sync` (E0277):
+    ///
+    /// ```compile_fail,E0277
+    /// let kp = brokkr_crypto::DualKeyPair::generate().unwrap();
+    /// let r = &kp;
+    /// std::thread::scope(|s| {
+    ///     s.spawn(move || {
+    ///         let _ = r.public_key_bytes(); // &DualKeyPair is not Send (DualKeyPair is !Sync)
+    ///     });
+    /// });
+    /// ```
+    pub fn sign_dual(&mut self, msg: &[u8]) -> Result<DualSignature, CryptoError> {
         let lattice = Signature {
             alg: SignatureAlg::MlDsa65,
             bytes: self.mldsa.sign(msg).map_err(|_| CryptoError::Backend)?,

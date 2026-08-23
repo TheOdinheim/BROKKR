@@ -100,3 +100,81 @@ impl ToolExecutor for FixedResultTool {
         })
     }
 }
+
+/// A filesystem write tool that **validates its own input** (13-FIX F-2).
+///
+/// The spine gates *declared authority*, never the content of `Action.detail` (the §13 residual).
+/// Path safety is therefore the **tool's** responsibility, and this is where it lives: the tool
+/// canonicalizes the requested path against a fixed `root` and **rejects any path that escapes it**
+/// — `..`, absolute escapes, and root-relative traversal — returning a [`ToolError`] (never a
+/// panic). It writes a fixed marker only when the target is inside the sandbox.
+pub struct SandboxedTool {
+    id: ToolId,
+    /// The canonical sandbox root. Every write must resolve to a path under this.
+    root: std::path::PathBuf,
+}
+
+impl SandboxedTool {
+    /// Construct over a sandbox root. The root must already exist (it is canonicalized here, which
+    /// resolves symlinks in the root itself); a missing/inaccessible root is a [`ToolError`].
+    pub fn new(id: ToolId, root_dir: impl AsRef<std::path::Path>) -> Result<Self, ToolError> {
+        let root = std::fs::canonicalize(root_dir).map_err(|e| ToolError {
+            detail: format!("sandbox root is not accessible: {e}"),
+        })?;
+        Ok(Self { id, root })
+    }
+
+    /// Resolve `detail` to an absolute path and confirm it stays within the sandbox root. Returns a
+    /// [`ToolError`] if it escapes. The requested path is joined onto the root (an absolute request
+    /// replaces the root, then must still be under it), then **lexically** normalized (`.`/`..`
+    /// resolved without touching the filesystem, so a not-yet-existing target can be checked).
+    pub fn resolve(&self, detail: &str) -> Result<std::path::PathBuf, ToolError> {
+        let joined = self.root.join(detail);
+        let normalized = normalize_lexical(&joined);
+        if normalized.starts_with(&self.root) {
+            Ok(normalized)
+        } else {
+            Err(ToolError {
+                detail: format!(
+                    "path escapes the sandbox root {}: {}",
+                    self.root.display(),
+                    normalized.display()
+                ),
+            })
+        }
+    }
+}
+
+impl ToolExecutor for SandboxedTool {
+    fn tool_id(&self) -> &ToolId {
+        &self.id
+    }
+    fn execute(&self, action: &AuthorizedAction) -> Result<ToolOutcome, ToolError> {
+        let path = self.resolve(&action.action().detail)?;
+        std::fs::write(&path, b"written by SandboxedTool").map_err(|e| ToolError {
+            detail: format!("write failed: {e}"),
+        })?;
+        Ok(ToolOutcome {
+            output: format!("wrote within sandbox: {}", path.display()),
+        })
+    }
+}
+
+/// Lexically normalize a path — resolve `.` and `..` components **without touching the filesystem**
+/// (so a target that does not yet exist can still be checked). Symlink resolution within an
+/// existing tree is not performed here; the sandbox root is canonicalized (symlink-resolved) at
+/// construction, which covers the common escape (`..`).
+fn normalize_lexical(p: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}

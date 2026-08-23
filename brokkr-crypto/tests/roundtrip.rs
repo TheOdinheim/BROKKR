@@ -83,7 +83,7 @@ fn test_slhdsa192s_roundtrip_and_tamper() {
 
 #[test]
 fn test_dual_signature_requires_both_families() {
-    let kp = DualKeyPair::generate().unwrap();
+    let mut kp = DualKeyPair::generate().unwrap();
     let dual = kp.sign_dual(MSG).unwrap();
 
     assert_eq!(dual.lattice.alg, SignatureAlg::MlDsa65);
