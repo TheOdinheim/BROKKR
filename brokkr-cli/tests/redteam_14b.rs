@@ -808,19 +808,16 @@ fn attack_6_4_parent_dir_rejected() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 6.5 — an EMPTY detail resolves to the sandbox root DIRECTORY itself (starts_with is true). The
-/// sandbox check passes; the actual write would then fail at the filesystem layer (cannot write a
-/// file to a directory path). Documented as F-15: `resolve("")` is accepted by the path check.
+/// 6.5 — an EMPTY detail. 14-FIX F-15: the sandbox now rejects an empty target at the path-check
+/// layer (previously it resolved to the root directory and relied on the filesystem to refuse the
+/// write). An empty path is never a valid write target.
 #[test]
-fn attack_6_5_empty_path_resolves_to_root_dir() {
+fn attack_6_5_empty_path_rejected() {
     let (tool, root) = sandbox();
     let r = tool.resolve("");
     assert!(
-        r.is_ok(),
-        "empty detail resolves to the root itself (passes the sandbox check)"
+        r.is_err(),
+        "empty detail is rejected by the sandbox check itself (F-15): {r:?}"
     );
-    assert_eq!(r.unwrap(), std::fs::canonicalize(&root).unwrap());
-    // A real execute() on "" would fail when std::fs::write targets a directory — the sandbox check
-    // is not the layer that rejects it.
     let _ = std::fs::remove_dir_all(&root);
 }

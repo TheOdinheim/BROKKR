@@ -141,6 +141,16 @@ pub enum DenialStage {
 /// this is denied before any gate is consulted. Unconditional — a pure resource safety cap.
 pub const MAX_DETAIL_BYTES: usize = 1_048_576; // 1 MiB
 
+/// The maximum number of `(principal, nonce)` entries the replay guard retains (14-FIX F-13). A
+/// well-formed chain expires and its entry is evicted (its expiry is bounded by the actor's
+/// credential lifetime, OQGF-M-14); but a *malformed* chain carrying an implausibly far expiry
+/// (e.g. `u64::MAX`) would never be evicted by expiry, so without a cap the ledger could grow
+/// without bound. At capacity, the entry closest to expiring (smallest expiry) is evicted before a
+/// new one is inserted — it is the one nearest legitimate eviction anyway. Bounds memory
+/// regardless of the expiry values a chain declares; it never *forgets* a still-fresh nonce
+/// preferentially, so it cannot wrongly admit a replay of a normal chain.
+pub const MAX_NONCE_ENTRIES: usize = 10_000;
+
 /// A sliding-window rate limit: at most `max` hops per `window_ms` milliseconds (13-FIX F-7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimit {
@@ -313,11 +323,24 @@ impl Orchestrator {
         if self.guards.replay_guard {
             st.seen_nonces.retain(|_, expiry| now.0 <= expiry.0);
             let key = (chain.root().principal.clone(), chain.root().nonce);
+            // Replay check first — a resubmitted nonce is caught here regardless of the cap.
             if st.seen_nonces.contains_key(&key) {
                 return Some(HopResult::Denied {
                     stage: DenialStage::Gate,
                     reason: "chain replay detected".to_string(),
                 });
+            }
+            // F-13 — bound the ledger. When at capacity, evict the entry closest to expiring
+            // (smallest expiry) before inserting the genuinely-new nonce, so a stream of
+            // far-expiry chains cannot grow the map without bound.
+            if st.seen_nonces.len() >= MAX_NONCE_ENTRIES
+                && let Some(evict) = st
+                    .seen_nonces
+                    .iter()
+                    .min_by_key(|(_, expiry)| expiry.0)
+                    .map(|(k, _)| k.clone())
+            {
+                st.seen_nonces.remove(&evict);
             }
             st.seen_nonces.insert(key, chain.root().expiry);
         }
@@ -548,6 +571,17 @@ impl Orchestrator {
         let outcome = match self.tool.execute(&authorized) {
             Ok(o) => o,
             Err(e) => {
+                // F-20 — an *authorized* action that fails to execute must still be visible to
+                // HEIMDALL's reconciliation loop. `executed: None` records that the action was
+                // authorized but did not run, so a pattern of authorized-but-failing tools (a
+                // possible tamper or resource signal) is detectable rather than invisible.
+                self.sentinel.observe(
+                    &Observation::Hop {
+                        authorized: action.clone(),
+                        executed: None,
+                    },
+                    now,
+                );
                 return HopResult::Error {
                     detail: format!("tool execution failed: {e}"),
                 };
@@ -624,9 +658,15 @@ pub fn sanitize_for_audit(s: &str) -> String {
             '\u{1b}' => {
                 if chars.peek() == Some(&'[') {
                     chars.next();
+                    // Consume the CSI body until its final byte (@-~). **F-14:** cap the skip at 16
+                    // chars so an *unterminated* CSI (ESC `[` followed only by parameter/intermediate
+                    // bytes to EOF) drops at most a bounded prefix, not the entire tail — an attacker
+                    // can no longer truncate a recorded value by appending a lone `ESC [`.
+                    let mut consumed = 0usize;
                     for e in chars.by_ref() {
-                        if ('\u{40}'..='\u{7e}').contains(&e) {
-                            break; // final byte of the CSI sequence
+                        consumed += 1;
+                        if ('\u{40}'..='\u{7e}').contains(&e) || consumed >= 16 {
+                            break; // final byte of the CSI sequence, or the F-14 cap
                         }
                     }
                 }

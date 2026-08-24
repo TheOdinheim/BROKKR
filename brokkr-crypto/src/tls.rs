@@ -127,7 +127,17 @@ pub enum TlsError {
     Write(i32),
     /// A `wolfSSL_read` returned a negative result (a hard error, distinct from a clean close).
     Read(i32),
+    /// The peer sent more than [`MAX_RESPONSE_BYTES`] without closing — a malicious or
+    /// compromised endpoint streaming without end (F-19). The read is aborted rather than
+    /// allowed to exhaust memory.
+    ResponseTooLarge,
 }
+
+/// The maximum response size [`TlsClient::read_until_close`] will accumulate before aborting
+/// (F-19). 10 MiB is generous for any model response — an ollama coding reply is well under
+/// 100 KiB — while bounding a compromised-endpoint OOM. A read past this returns
+/// [`TlsError::ResponseTooLarge`].
+pub const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
 impl core::fmt::Display for TlsError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -287,6 +297,11 @@ impl TlsClient {
             if n > 0 {
                 if let Some(chunk) = buf.get(..n as usize) {
                     out.extend_from_slice(chunk);
+                }
+                // F-19 — bound the accumulation: a peer that streams without closing cannot drive
+                // the client to OOM.
+                if out.len() > MAX_RESPONSE_BYTES {
+                    return Err(TlsError::ResponseTooLarge);
                 }
             } else if n == 0 {
                 break; // clean peer close

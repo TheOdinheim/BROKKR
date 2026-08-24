@@ -49,6 +49,10 @@ pub const SHA384_DIGEST_SIZE: usize = 48;
 pub const MLDSA65_PUB_SIZE: usize = 1952;
 /// SLH-DSA-SHAKE-192s public-key size (wc_SlhDsaKey_PublicSizeFromParam; probed = 48).
 pub const SLHDSA192S_PUB_SIZE: usize = 48;
+/// SLH-DSA-SHAKE-192s signature size (FIPS-205 params; probed against the linked
+/// `libwolfssl` = 16224). The "small" (`s`) parameter set; distinct from the `f`/fast
+/// variant's 35664. Used to cross-check the key parameterization at keygen (F-18).
+pub const SLHDSA192S_SIG_SIZE: usize = 16224;
 
 // --- Opaque, heap-allocated key types (only ever used behind a pointer) ---
 #[repr(C)]
@@ -492,6 +496,13 @@ impl SlhDsaShake192s {
         unsafe {
             check(wc_SlhDsaKey_Init(p, SLHDSA_SHAKE192S, ptr::null_mut(), -2))?;
             check(wc_SlhDsaKey_MakeKey(p, me.rng.ptr))?;
+        }
+        // Guard against silently binding a wrong-parameter key — symmetric with `MlDsa65::generate`
+        // (F-18). The sign buffer is always sized from `sig_size()`, so this is defense-in-depth,
+        // not a memory-safety fix: it catches a mis-parameterized SLH-DSA key at keygen rather than
+        // trusting the library.
+        if me.sig_size()? != SLHDSA192S_SIG_SIZE {
+            return Err(-2);
         }
         Ok(me)
     }

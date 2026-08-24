@@ -506,11 +506,11 @@ fn attack_4_2_guard_vs_sindri_timing() {
 // 5. Cross-subsystem interaction
 // ======================================================================================
 
-/// 5.1 — a tool execution FAILURE produces `HopResult::Error` and **no HEIMDALL observation**: the
-/// step-8 reconciliation feed is unreachable after a tool error. A failed authorized execution is
-/// invisible to HEIMDALL's behavioral loop (F-20).
+/// 5.1 — a tool execution FAILURE produces `HopResult::Error`, and **14-FIX F-20** now also feeds
+/// HEIMDALL an `Observation::Hop { executed: None }` — a failed *authorized* execution is visible to
+/// the reconciliation loop, so a pattern of authorized-but-failing tools is detectable.
 #[test]
-fn attack_5_1_tool_error_is_invisible_to_heimdall() {
+fn attack_5_1_tool_error_is_observed_by_heimdall() {
     let err_calls = Arc::new(Counter::default());
     let rig = rig(
         Box::new(ErrTool {
@@ -527,11 +527,12 @@ fn attack_5_1_tool_error_is_invisible_to_heimdall() {
         "tool error → HopResult::Error: {r:?}"
     );
     assert_eq!(err_calls.count(), 1, "the tool ran and failed");
-    // HEIMDALL received NO Hop observation (the reconciliation gap, F-20).
+    // F-20: HEIMDALL received a Hop observation marking the authorized-but-unexecuted action.
     let obs = rig.observations.lock().unwrap();
     assert!(
-        !obs.iter().any(|o| matches!(o, Observation::Hop { .. })),
-        "a failed execution emits no reconciliation observation"
+        obs.iter()
+            .any(|o| matches!(o, Observation::Hop { executed: None, .. })),
+        "a failed authorized execution emits a reconciliation observation (F-20): {obs:?}"
     );
 }
 

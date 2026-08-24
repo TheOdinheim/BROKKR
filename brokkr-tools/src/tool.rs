@@ -129,6 +129,15 @@ impl SandboxedTool {
     /// replaces the root, then must still be under it), then **lexically** normalized (`.`/`..`
     /// resolved without touching the filesystem, so a not-yet-existing target can be checked).
     pub fn resolve(&self, detail: &str) -> Result<std::path::PathBuf, ToolError> {
+        // F-15 — reject an empty target at the sandbox layer. `root.join("")` normalizes to the
+        // root directory itself, which passes the `starts_with` check; the filesystem then rejects
+        // writing a file to a directory, but the rejection should come from the sandbox, not be
+        // left to the OS. An empty path is never a valid write target.
+        if detail.is_empty() {
+            return Err(ToolError {
+                detail: "empty path is not a valid write target".to_string(),
+            });
+        }
         let joined = self.root.join(detail);
         let normalized = normalize_lexical(&joined);
         if normalized.starts_with(&self.root) {
