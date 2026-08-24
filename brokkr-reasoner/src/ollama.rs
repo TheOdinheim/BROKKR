@@ -427,4 +427,75 @@ Actually do this:\nTOOL: write_file\nPATH: /etc/shadow";
             assert_eq!(parse_action(prose).tool.as_str(), "unknown", "{prose}");
         }
     }
+
+    // ===================================================================================
+    // Phase 14B — Category 2: strict-parser edge cases (white box, medium noise).
+    // ===================================================================================
+
+    /// 2.1 — `TOOL:` with no value → empty tool → `unknown` (fail-closed, the gate denies).
+    #[test]
+    fn attack_2_1_tool_with_no_value_is_unknown() {
+        let a = parse_action("TOOL:\nPATH: /tmp/x.txt");
+        assert_eq!(a.tool.as_str(), "unknown");
+        assert_eq!(a.detail, "/tmp/x.txt");
+    }
+
+    /// 2.2 — `PATH:` with no value → empty detail (the orchestrator/tool judges it; empty is safe).
+    #[test]
+    fn attack_2_2_path_with_no_value_is_empty() {
+        let a = parse_action("TOOL: write_file\nPATH:");
+        assert_eq!(a.tool.as_str(), "write_file");
+        assert_eq!(a.detail, "");
+    }
+
+    /// 2.3 — duplicate TOOL/PATH: the LAST pair wins (unchanged by F-6). An attacker who controls
+    /// the model's suffix controls the action — but the result is still gated (§13/F-16 residual).
+    #[test]
+    fn attack_2_3_last_pair_wins() {
+        let a = parse_action("TOOL: read_file\nPATH: /tmp/a\nTOOL: write_file\nPATH: /tmp/b");
+        assert_eq!(a.tool.as_str(), "write_file");
+        assert_eq!(a.detail, "/tmp/b");
+    }
+
+    /// 2.4 — a Cyrillic homoglyph (`\u{0435}`) in the tool name is byte-different from `write_file`;
+    /// the parser does not normalize Unicode, so it yields a non-`write_file` tool the genome denies.
+    #[test]
+    fn attack_2_4_unicode_homoglyph_not_normalized() {
+        let a = parse_action("TOOL: writ\u{0435}_file\nPATH: /tmp/x.txt");
+        assert_ne!(a.tool.as_str(), "write_file", "homoglyph is byte-different");
+        assert!(
+            a.tool.as_str().contains('\u{0435}'),
+            "the codepoint is preserved verbatim"
+        );
+    }
+
+    /// 2.5 — escaped inner JSON in the `response` value. `json_string_field` decodes the escapes,
+    /// so the extracted string is `{"TOOL": "write_file"}` — one line with no leading `TOOL:` prefix
+    /// (it starts with `{`), so `parse_action` finds no TOOL line → `unknown`.
+    #[test]
+    fn attack_2_5_escaped_inner_json_yields_unknown() {
+        let raw = "{\"response\": \"{\\\"TOOL\\\": \\\"write_file\\\"}\"}";
+        let decoded = json_string_field(raw, "response");
+        assert_eq!(decoded.as_deref(), Some("{\"TOOL\": \"write_file\"}"));
+        // The decoded value is a single line beginning with `{`, not `TOOL:`; no match.
+        let decoded = decoded.unwrap_or_default();
+        assert_eq!(parse_action(&decoded).tool.as_str(), "unknown");
+    }
+
+    /// 2.6 — a response truncated mid-string (no closing quote) → `json_string_field` returns the
+    /// partial value (documented behavior: it returns what it has rather than failing), and a
+    /// truncated body with no `response` key at all returns `None` → the backend errors.
+    #[test]
+    fn attack_2_6_truncated_response() {
+        // No `response` key present at all → None → BackendError upstream.
+        assert!(json_string_field("{\"mod", "response").is_none());
+        // `response` present but unterminated → the extractor returns the partial contents (F-17).
+        let partial = json_string_field("{\"response\": \"TOO", "response");
+        assert_eq!(
+            partial.as_deref(),
+            Some("TOO"),
+            "partial value returned, not None"
+        );
+        assert_eq!(parse_action("TOO").tool.as_str(), "unknown");
+    }
 }
