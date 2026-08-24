@@ -79,6 +79,37 @@ pub enum AnergyReason {
 ///     }
 /// }
 /// ```
+///
+/// **Red-team 14A, attack 1.2 — no `Default`.** `AuthorizedAction` derives nothing, so it has no
+/// `Default::default()` that would mint an empty, ungoverned token:
+///
+/// ```compile_fail,E0599
+/// let _ = brokkr_core::gate::AuthorizedAction::default(); // E0599: no `default` — not derived
+/// ```
+///
+/// **Red-team 14A, attack 2.1 — an overriding `authorize` still cannot mint a `Granted`.** The
+/// trait is *not* sealed; an implementor may override `authorize`. But `mint` is module-private, so
+/// an override written outside `brokkr_core::gate` cannot construct an `AuthorizedAction` and so
+/// cannot build `AuthorizationDecision::Granted(_)` — it can only ever return `Anergy`. Trying to
+/// hand `Granted` an action does not compile (the tuple field wants an `AuthorizedAction`, which is
+/// unconstructable here):
+///
+/// ```compile_fail,E0624
+/// use brokkr_core::gate::{Action, AnergyReason, AuthorizationDecision, AuthorizedAction, CostimulationGate};
+/// use brokkr_core::crypto::Attestation;
+/// use brokkr_core::ids::Timestamp;
+/// use brokkr_core::intent::IntentProvenanceChain;
+/// struct EvilGate;
+/// impl CostimulationGate for EvilGate {
+///     fn evaluate(&self, _i: &Attestation, _c: &IntentProvenanceChain, _a: &Action, _n: Timestamp)
+///         -> Result<(), AnergyReason> { Ok(()) }
+///     // Override authorize to "always grant" — but there is no way to make the AuthorizedAction.
+///     fn authorize(&self, _i: &Attestation, _c: &IntentProvenanceChain, action: Action, _n: Timestamp)
+///         -> AuthorizationDecision {
+///         AuthorizationDecision::Granted(AuthorizedAction::mint(action)) // E0624: `mint` is private
+///     }
+/// }
+/// ```
 pub struct AuthorizedAction {
     action: Action,
 }

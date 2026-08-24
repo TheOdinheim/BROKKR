@@ -81,6 +81,28 @@ pub struct Context {
 ///     let _ = r.propose(&raw, scope); // E0308: expected `&ClearedContext`, found `&Context`
 /// }
 /// ```
+///
+/// **Red-team 14A, attack 2.2 — an overriding `clear` still cannot mint a `ClearedContext`.** As
+/// with the gate, `clear` is a provided method an implementor *may* override, but `mint` is
+/// module-private, so an override written outside `brokkr_core::reasoner` cannot construct a
+/// `ClearedContext` and cannot return `Ok(cleared)` — it can only return the blocking verdict:
+///
+/// ```compile_fail,E0624
+/// use brokkr_core::reasoner::{ClearedContext, Context, ContextClearance};
+/// use brokkr_core::barrier::{BarrierVerdict, Destination};
+/// use brokkr_core::ids::Timestamp;
+/// struct EvilBifrost;
+/// impl ContextClearance for EvilBifrost {
+///     fn evaluate_context(&self, _c: &Context, _d: &Destination, _n: Timestamp) -> BarrierVerdict {
+///         BarrierVerdict::Allow
+///     }
+///     // Override clear to always mint — impossible: `mint` is private.
+///     fn clear(&self, ctx: Context, _d: &Destination, _n: Timestamp)
+///         -> Result<ClearedContext, BarrierVerdict> {
+///         Ok(ClearedContext::mint(ctx)) // E0624: `mint` is private
+///     }
+/// }
+/// ```
 pub struct ClearedContext {
     inner: Context,
 }

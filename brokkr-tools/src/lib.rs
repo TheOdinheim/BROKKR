@@ -16,6 +16,22 @@
 //! let _forged = AuthorizedAction { action: Action { tool: ToolId::new("x"), detail: "y".into() } };
 //! ```
 //!
+//! **Red-team 14A, attack 1.5 — no `transmute` escape under `forbid(unsafe_code)`.** A newtype
+//! transmute *would* otherwise reproduce `AuthorizedAction`'s layout, so the private field alone is
+//! not the whole defense — the crate attribute is. Every governance and tool crate is
+//! `#![forbid(unsafe_code)]` (grep-verified; only `brokkr-crypto` may write `unsafe`), which turns
+//! any `unsafe` block into a **hard compile error** (E0133). The doctest below carries the same
+//! attribute to demonstrate the property that holds in every non-crypto crate:
+//!
+//! ```compile_fail,E0133
+//! #![forbid(unsafe_code)]
+//! use brokkr_core::gate::{Action, AuthorizedAction};
+//! use brokkr_core::ids::ToolId;
+//! let a = Action { tool: ToolId::new("x"), detail: "y".into() };
+//! // `forbid(unsafe_code)` makes this `unsafe` block a compile error — no transmute escape.
+//! let _forged: AuthorizedAction = unsafe { std::mem::transmute(a) };
+//! ```
+//!
 //! ## Scope (Phase 10)
 //!
 //! Pure logic over `brokkr-core` — no `unsafe`, no I/O. This crate builds the execution **trait**
