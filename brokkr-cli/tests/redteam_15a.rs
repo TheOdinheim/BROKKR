@@ -605,13 +605,12 @@ fn g2_2_4_permissive_orchestrator_admits_replay() {
     assert_eq!(r.tool_calls.count(), 2);
 }
 
-/// 2.6 — **F-22.** The F-5 fix made the denial *stage* uniform (`Genome` → `Gate`) so the caller
-/// cannot tell a declared tool from an undeclared one by the stage. But the denial *reason string*
-/// still differs: a genome refusal returns `refusal.detail` ("tool X not declared"), while a SINDRI
-/// denial returns "architectural anergy: …". The genome-enumeration oracle F-5 closed on the stage
-/// is **re-opened on the reason string**.
+/// 2.6 — **F-22, hardened in 15-FIX.** F-5 made the denial *stage* uniform; F-22 observed the
+/// *reason string* still leaked (genome `refusal.detail` vs SINDRI anergy). 15-FIX uniforms the
+/// reason too: under production guards a genome refusal and a SINDRI denial now return the **same
+/// `(stage, reason)`** pair, so neither channel distinguishes a declared from an undeclared tool.
 #[test]
-fn g2_2_6_denial_reason_string_defeats_uniform_stage() {
+fn g2_2_6_denial_reason_string_is_uniform_under_production() {
     // Genome refusal: an undeclared tool. Stage is uniform Gate; reason names the genome refusal.
     let undeclared = rig(
         "write_file",
@@ -643,22 +642,14 @@ fn g2_2_6_denial_reason_string_defeats_uniform_stage() {
         HopResult::Denied { stage, reason } => (stage, reason),
         other => panic!("expected SINDRI denial: {other:?}"),
     };
-    // F-5 held on the stage: both are the uniform Gate.
+    // 15-FIX: both the stage AND the reason are now uniform — the oracle is closed on both channels.
     assert_eq!(gs, DenialStage::Gate);
     assert_eq!(ss, DenialStage::Gate);
-    // F-22: but the reason strings are distinguishable — the oracle survives on the reason.
-    assert!(
-        gr.contains("not declared"),
-        "genome reason leaks declaration status: {gr:?}"
-    );
-    assert!(
-        sr.contains("anergy"),
-        "SINDRI reason is distinguishable: {sr:?}"
-    );
-    assert_ne!(
+    assert_eq!(
         gr, sr,
-        "the two denial reasons are distinguishable despite the uniform stage"
+        "the two denial reasons are now identical (F-22 fixed)"
     );
+    assert_eq!(gr, "action denied", "the uniform reason: {gr:?}");
 }
 
 // ======================================================================================

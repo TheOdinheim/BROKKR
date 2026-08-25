@@ -422,11 +422,11 @@ fn g1_1_4_nonce_is_dap_controlled_not_model() {
 // 2. G2 — insider: targeted exploitation of the F-22 oracle
 // ======================================================================================
 
-/// 2.1 — under PRODUCTION guards (uniform `Gate` stage), the denial *reason string* still
-/// distinguishes an undeclared tool (genome refusal) from a declared-but-out-of-scope one (SINDRI).
-/// Confirms and pins the exact strings behind F-22.
+/// 2.1 — **F-22, hardened in 15-FIX.** Under PRODUCTION guards the denial reason is now uniform:
+/// an undeclared tool (genome refusal) and a declared-but-out-of-scope one (SINDRI) return the
+/// **same** `(stage, reason)` pair, so the reason string no longer distinguishes them.
 #[test]
-fn g2_2_1_reason_string_distinguishes_under_production_guards() {
+fn g2_2_1_reason_string_is_uniform_under_production_guards() {
     let genome = Genome {
         tools: &[("write_file", "write")],
         forbids: &[],
@@ -462,58 +462,51 @@ fn g2_2_1_reason_string_distinguishes_under_production_guards() {
             ..
         }
     ));
-    // But the reasons are distinguishable (F-22).
+    // 15-FIX: the reasons are now identical — the oracle is closed on the reason channel too.
     let (ur, dr) = (reason_of(&undeclared), reason_of(&declared_oos));
-    assert!(ur.contains("not declared"), "undeclared reason: {ur}");
-    assert!(
-        dr.contains("OutOfScope"),
-        "declared-out-of-scope reason: {dr}"
-    );
-    assert_ne!(ur, dr);
+    assert_eq!(ur, dr, "reasons are uniform under production (F-22 fixed)");
+    assert_eq!(ur, "action denied", "the uniform reason: {ur}");
 }
 
-/// 2.2 — **F-26.** Chain the F-22 oracle with probing to map the genome. Five declared and five
-/// undeclared tool names are probed under PRODUCTION guards; each is classified purely by its
-/// denial reason string. Classification is perfect — the entire closed vocabulary is enumerable.
+/// 2.2 — **F-26, hardened in 15-FIX.** The genome-enumeration oracle is now closed under production
+/// guards: every probe — declared or undeclared — yields the identical uniform reason, so the reason
+/// string carries **no** classifying information. Enumeration by reason fails.
 #[test]
-fn g2_2_2_genome_fully_enumerable_via_reason_strings() {
+fn g2_2_2_genome_no_longer_enumerable_via_reason_strings() {
     let genome = Genome {
         tools: DECLARED,
         forbids: &[],
     };
-    // Classifier: "not declared" in the reason ⇒ undeclared; "OutOfScope" ⇒ declared (in-genome but
-    // the {read} chain lacks the write capability).
-    let classify = |name: &str| -> bool {
-        let r = run(
+    let reason_for = |name: &str| -> String {
+        reason_of(&run(
             genome.clone(),
             propose(name, "/tmp/x"),
             &fx().read_scope,
             P1,
             Guards::production(),
-        );
-        let reason = reason_of(&r);
-        // Returns true iff classified as DECLARED.
-        if reason.contains("not declared") {
-            false
-        } else if reason.contains("OutOfScope") {
-            true
-        } else {
-            panic!("unexpected reason for {name}: {reason}");
-        }
+        ))
     };
+    // Every reason — for a declared tool AND an undeclared one — is the single uniform string, so a
+    // reason-string classifier has nothing to separate them on.
+    let mut all = Vec::new();
     for (name, _) in DECLARED {
-        assert!(classify(name), "{name} should classify as declared");
+        all.push(reason_for(name));
     }
     for name in UNDECLARED {
-        assert!(!classify(name), "{name} should classify as undeclared");
+        all.push(reason_for(name));
     }
+    assert!(
+        all.iter().all(|r| r == "action denied"),
+        "every probe returns the uniform reason — the genome is no longer enumerable: {all:?}"
+    );
 }
 
-/// 2.3 — the full denial-reason signature table. Each evaluation path yields a distinct reason,
-/// giving an insider a complete external model of where a hop died. (Combined with timing from 14C,
-/// this is the whole pipeline observable from the outside.)
+/// 2.3 — the full denial-reason signature table, **under permissive guards**. Each evaluation path
+/// yields a distinct reason there. Note (15-FIX F-22): under *production* guards these gate denials
+/// collapse to the single uniform "action denied" — so this fine-grained table is now a
+/// permissive-only (misconfiguration) observation, not a production one.
 #[test]
-fn g2_2_3_denial_reason_signature_table() {
+fn g2_2_3_denial_reason_signature_table_permissive_only() {
     let genome = Genome {
         tools: &[("net_tool", "network"), ("write_file", "write")],
         forbids: &[("no-network", "network")],
@@ -624,8 +617,9 @@ fn combined_3_1_enumerate_exploit_audit_intact() {
         tools: DECLARED,
         forbids: &[],
     };
-    // (1) Enumerate: probe two names, classify by reason, find the declared one.
-    let is_declared = |name: &str| {
+    // (1) Enumerate. 15-FIX: under PRODUCTION guards the reason oracle is CLOSED — write_file and
+    // backdoor both return the uniform "action denied", so recon by reason fails.
+    let reason_prod = |name: &str| {
         reason_of(&run(
             genome.clone(),
             propose(name, "/tmp/x"),
@@ -633,16 +627,26 @@ fn combined_3_1_enumerate_exploit_audit_intact() {
             P1,
             Guards::production(),
         ))
+    };
+    assert_eq!(
+        reason_prod("write_file"),
+        reason_prod("backdoor"),
+        "enumeration by reason is closed under production (F-22/F-26 fixed)"
+    );
+    // The residual survives only under a PERMISSIVE (misconfigured) deployment, where the reason
+    // still distinguishes declared (OutOfScope) from undeclared (not declared).
+    let is_declared_permissive = |name: &str| {
+        reason_of(&run(
+            genome.clone(),
+            propose(name, "/tmp/x"),
+            &fx().read_scope,
+            P1,
+            Guards::permissive(),
+        ))
         .contains("OutOfScope")
     };
-    assert!(
-        is_declared("write_file"),
-        "enumeration finds write_file declared"
-    );
-    assert!(
-        !is_declared("backdoor"),
-        "enumeration finds backdoor undeclared"
-    );
+    assert!(is_declared_permissive("write_file"));
+    assert!(!is_declared_permissive("backdoor"));
 
     // (2) Exploit: a matching-scope chain grants the declared tool.
     let rig = build(

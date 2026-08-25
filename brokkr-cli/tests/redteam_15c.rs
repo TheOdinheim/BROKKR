@@ -450,12 +450,12 @@ fn g2_2_2_tool_env_probe_is_not_audited() {
     );
 }
 
-/// 2.4 — **F-29.** The F-13 nonce-ledger cap (`MAX_NONCE_ENTRIES`) creates a bounded replay window.
-/// A patient attacker who drives `MAX_NONCE_ENTRIES` distinct nonces (all with expiry ≥ the target's)
-/// evicts the target's entry — after which the target chain can be **replayed**, admitted by the
-/// guard. The F-13 memory bound trades unbounded growth for a finite replay-protection window.
+/// 2.4 — **F-29, hardened in 15-FIX.** The nonce-flood attack is now defeated. A patient attacker who
+/// drives `MAX_NONCE_ENTRIES` fresh nonces can no longer evict a still-valid target: the fix evicts
+/// only *expired* entries, and when the ledger is full of valid nonces it **rejects** new chains
+/// ("nonce ledger full") rather than dropping a fresh one. The target's replay stays denied.
 #[test]
-fn g2_2_4_nonce_cap_opens_a_replay_window() {
+fn g2_2_4_nonce_flood_no_longer_opens_a_replay_window() {
     // A denying crossing so each hop stops right after the driver guards record its nonce.
     let calls = Arc::new(Counter::default());
     let rig = build(
@@ -472,35 +472,37 @@ fn g2_2_4_nonce_cap_opens_a_replay_window() {
         },
     );
     let now = Timestamp(1000);
-    let target_expiry = u64::MAX - 1; // smallest → the eviction target when the cap is hit
-    let flood_expiry = u64::MAX;
+    let far = u64::MAX; // every chain is still fresh at `now`
 
-    // The target chain is seen (nonce 0, still fresh).
+    // The target chain is seen (nonce 0, still fresh; admitted by the guard, denied by the crossing).
     assert!(matches!(
-        rig.orch.execute_hop(req(variant(0, target_expiry)), now),
+        rig.orch.execute_hop(req(variant(0, far)), now),
         HopResult::Denied {
             stage: DenialStage::Bifrost,
             ..
         }
     ));
-    // Flood MAX_NONCE_ENTRIES more distinct nonces → the target (smallest expiry) is evicted.
+    // Flood MAX_NONCE_ENTRIES more distinct fresh nonces. Once the ledger is full of valid entries,
+    // the overflow is REJECTED rather than evicting the target.
+    let mut ledger_full_seen = false;
     for i in 1..=MAX_NONCE_ENTRIES as u64 {
-        let _ = rig.orch.execute_hop(req(variant(i, flood_expiry)), now);
+        if let HopResult::Denied { reason, .. } = rig.orch.execute_hop(req(variant(i, far)), now)
+            && reason.contains("ledger full")
+        {
+            ledger_full_seen = true;
+        }
     }
-    // Replay the target: its nonce was evicted, so the guard ADMITS it (crossing then denies). The
-    // replay protection for this still-fresh nonce has been defeated by exhaustion.
-    match rig.orch.execute_hop(req(variant(0, target_expiry)), now) {
-        HopResult::Denied {
-            stage: DenialStage::Bifrost,
-            ..
-        } => { /* admitted by the guard (bypassed), denied only by the crossing */ }
+    assert!(
+        ledger_full_seen,
+        "a full ledger rejects the flood overflow rather than evicting a fresh nonce (F-29)"
+    );
+    // Replay the target: it was NEVER evicted, so the guard still catches the replay — the attack fails.
+    match rig.orch.execute_hop(req(variant(0, far)), now) {
         HopResult::Denied {
             stage: DenialStage::Gate,
             reason,
-        } if reason.contains("replay") => {
-            panic!("the target was NOT evicted — replay still caught (attack failed)")
-        }
-        other => panic!("unexpected: {other:?}"),
+        } if reason.contains("replay") => { /* replay still denied — F-29 holds */ }
+        other => panic!("the target must remain replay-protected after a flood, got {other:?}"),
     }
 }
 

@@ -151,6 +151,13 @@ pub const MAX_DETAIL_BYTES: usize = 1_048_576; // 1 MiB
 /// preferentially, so it cannot wrongly admit a replay of a normal chain.
 pub const MAX_NONCE_ENTRIES: usize = 10_000;
 
+/// The single denial reason returned for **every** gate denial when `uniform_denial_stage` is on
+/// (15-FIX F-22/F-26). Under production guards a genome refusal and a SINDRI anergy return the same
+/// `(stage, reason)` pair, so the reason string cannot be used to tell a declared tool from an
+/// undeclared one (which 15B F-26 showed enumerates the whole genome). The *specific* reason is
+/// still written to SAGA (the audit is trusted; the returned face is not).
+pub const UNIFORM_DENIAL_REASON: &str = "action denied";
+
 /// A sliding-window rate limit: at most `max` hops per `window_ms` milliseconds (13-FIX F-7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimit {
@@ -330,17 +337,17 @@ impl Orchestrator {
                     reason: "chain replay detected".to_string(),
                 });
             }
-            // F-13 — bound the ledger. When at capacity, evict the entry closest to expiring
-            // (smallest expiry) before inserting the genuinely-new nonce, so a stream of
-            // far-expiry chains cannot grow the map without bound.
-            if st.seen_nonces.len() >= MAX_NONCE_ENTRIES
-                && let Some(evict) = st
-                    .seen_nonces
-                    .iter()
-                    .min_by_key(|(_, expiry)| expiry.0)
-                    .map(|(k, _)| k.clone())
-            {
-                st.seen_nonces.remove(&evict);
+            // F-13 — bound the ledger. F-29: only *expired* entries may be evicted. The `retain`
+            // above already dropped every expired entry, so a ledger still at capacity here holds
+            // only still-valid nonces. Rather than evict a fresh nonce to make room — which would
+            // open a replay window under nonce-space exhaustion (15C F-29) — reject the new chain.
+            // Replay protection wins over availability under a flood; the flood itself is the
+            // operator's signal to investigate.
+            if st.seen_nonces.len() >= MAX_NONCE_ENTRIES {
+                return Some(HopResult::Denied {
+                    stage: DenialStage::Gate,
+                    reason: "nonce ledger full — too many active chains".to_string(),
+                });
             }
             st.seen_nonces.insert(key, chain.root().expiry);
         }
@@ -488,18 +495,23 @@ impl Orchestrator {
                 },
                 now,
             );
-            // **F-5:** the SAGA record above carries the true (genome) reason; the *returned* stage
-            // is uniform `Gate` in production, so the caller cannot use it to tell a declared tool
-            // from an undeclared one. A permissive rig reports the real `Genome` stage.
+            // **F-5 / F-22:** under production guards the SAGA record above keeps the true reason
+            // (the Authorization event carries the attempted `action.tool` and the anergy category —
+            // the audit is trusted), while both the returned *stage* AND *reason* are uniform, so the
+            // caller cannot distinguish an undeclared tool from a SINDRI denial by either channel
+            // (15B F-26 showed a distinguishable reason enumerates the genome). A permissive rig
+            // reports the real `Genome` stage and the specific `refusal.detail`.
             let stage = if self.guards.uniform_denial_stage {
                 DenialStage::Gate
             } else {
                 DenialStage::Genome
             };
-            return HopResult::Denied {
-                stage,
-                reason: refusal.detail,
+            let reason = if self.guards.uniform_denial_stage {
+                UNIFORM_DENIAL_REASON.to_string()
+            } else {
+                refusal.detail
             };
+            return HopResult::Denied { stage, reason };
         }
 
         // ---- §5 step 5: SINDRI costimulates ------------------------------------------
@@ -520,9 +532,16 @@ impl Orchestrator {
                     },
                     now,
                 );
+                // F-22: uniform the reason under production guards so it is indistinguishable from a
+                // genome refusal; the specific `AnergyReason` is in the SAGA record above.
+                let reason = if self.guards.uniform_denial_stage {
+                    UNIFORM_DENIAL_REASON.to_string()
+                } else {
+                    format!("architectural anergy: {reason:?}")
+                };
                 return HopResult::Denied {
                     stage: DenialStage::Gate,
-                    reason: format!("architectural anergy: {reason:?}"),
+                    reason,
                 };
             }
         };

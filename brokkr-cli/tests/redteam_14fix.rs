@@ -284,12 +284,14 @@ fn req(chain: IntentProvenanceChain) -> HopRequest {
 
 // ---- F-13: the replay-nonce ledger is bounded ----------------------------------------
 
-/// Insert `MAX_NONCE_ENTRIES + 1` distinct nonces, all with a far-future expiry (so expiry never
-/// evicts them). The first is given the *smallest* expiry, so when the cap is hit it is the one
-/// evicted. The ledger therefore cannot grow past the cap: resubmitting the evicted nonce is
-/// *admitted* (proving it was dropped), while a still-present nonce is *replay-denied* (proving the
-/// ledger did not simply forget everything). Fails without F-13 (nonce_0 stays forever → its
-/// resubmit is replay-denied). Each hop stops at the denying crossing after the guard records it.
+/// The ledger is bounded — it never grows past `MAX_NONCE_ENTRIES`. **15-FIX F-29 changed the
+/// mechanism:** where F-13 evicted the smallest-expiry entry at capacity, F-29 evicts only *expired*
+/// entries and, when the ledger is full of still-valid nonces, **rejects** the new chain ("ledger
+/// full") rather than dropping a fresh one. This test fills the ledger with `MAX_NONCE_ENTRIES` fresh
+/// nonces, confirms the overflow is rejected (bounded), and confirms every recorded nonce is still
+/// remembered (never evicted while fresh). Fails without F-13/F-29 (an unbounded ledger admits the
+/// overflow; the old eviction would re-admit an evicted nonce). Each hop stops at the denying
+/// crossing after the guard records it.
 #[test]
 fn fix_f13_nonce_ledger_bounded() {
     let orch = orchestrator(
@@ -307,14 +309,12 @@ fn fix_f13_nonce_ledger_bounded() {
         },
     );
     let now = Timestamp(1000);
-    let smallest = u64::MAX - 1; // nonce_0's expiry — the eviction target when the cap is hit
-    let big = u64::MAX; // every other nonce
+    let fresh = u64::MAX; // every nonce is still valid at `now`
 
-    // Bulk-fill: nonce_0 (smallest expiry) then nonce_1 .. nonce_MAX (big expiry). Each is admitted
-    // by the guard and then denied by the crossing.
-    for i in 0..=MAX_NONCE_ENTRIES as u64 {
-        let expiry = if i == 0 { smallest } else { big };
-        match orch.execute_hop(req(variant(i, expiry)), now) {
+    // Fill the ledger to capacity with MAX_NONCE_ENTRIES distinct fresh nonces (0 .. MAX-1). Each is
+    // admitted by the guard and then denied by the crossing.
+    for i in 0..MAX_NONCE_ENTRIES as u64 {
+        match orch.execute_hop(req(variant(i, fresh)), now) {
             HopResult::Denied {
                 stage: DenialStage::Bifrost,
                 ..
@@ -323,26 +323,32 @@ fn fix_f13_nonce_ledger_bounded() {
         }
     }
 
-    // A still-present nonce (nonce_1) is replay-denied — the ledger did not forget everything.
-    match orch.execute_hop(req(variant(1, big)), now) {
+    // The ledger is now full of valid entries. A *new* nonce is REJECTED (F-29), not admitted by
+    // evicting a fresh one — this is the memory bound.
+    match orch.execute_hop(req(variant(MAX_NONCE_ENTRIES as u64, fresh)), now) {
         HopResult::Denied { stage, reason } => {
             assert_eq!(stage, DenialStage::Gate);
             assert!(
-                reason.contains("replay"),
-                "nonce_1 still remembered: {reason}"
+                reason.contains("ledger full"),
+                "overflow is rejected: {reason}"
             );
         }
-        other => panic!("nonce_1 should still be a replay: {other:?}"),
+        other => panic!("a full ledger must reject a new nonce (F-29): {other:?}"),
     }
 
-    // The evicted nonce (nonce_0, smallest expiry) is now ADMITTED — proof the ledger evicted it
-    // when it hit the cap, i.e. it is bounded and did not grow forever.
-    match orch.execute_hop(req(variant(0, smallest)), now) {
-        HopResult::Denied {
-            stage: DenialStage::Bifrost,
-            ..
-        } => {}
-        other => panic!("nonce_0 was evicted, so it must be re-admitted (not a replay): {other:?}"),
+    // Every recorded nonce is still remembered — none was evicted while fresh (F-29). Both the first
+    // and a middle nonce replay-deny.
+    for target in [0u64, 1u64] {
+        match orch.execute_hop(req(variant(target, fresh)), now) {
+            HopResult::Denied { stage, reason } => {
+                assert_eq!(stage, DenialStage::Gate);
+                assert!(
+                    reason.contains("replay"),
+                    "nonce_{target} still remembered: {reason}"
+                );
+            }
+            other => panic!("nonce_{target} must remain a replay (never evicted): {other:?}"),
+        }
     }
 }
 
