@@ -96,6 +96,7 @@ macro_rules! string_id {
 
 pub mod adapt;
 pub mod barrier;
+pub mod capability;
 pub mod classification;
 pub mod crypto;
 pub mod explanation;
