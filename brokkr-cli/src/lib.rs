@@ -41,6 +41,9 @@ use brokkr_audit::{
     RecordedInput,
 };
 use brokkr_core::barrier::{Barrier, BarrierVerdict, BoundaryFlow, Destination};
+use brokkr_core::capability::{
+    CapabilityEnvelope, EgressRule, EvidenceProvenance, TrajectoryEntry, TrajectoryOutcome,
+};
 use brokkr_core::classification::Classification;
 use brokkr_core::crypto::{Attestation, Digest, HashAlg, Hasher};
 use brokkr_core::gate::{Action, AuthorizationDecision, CostimulationGate};
@@ -52,7 +55,8 @@ use brokkr_crypto::Sha384Hasher;
 use brokkr_sentinel::{Detection, Heimdall, Observation};
 use brokkr_tools::ToolExecutor;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 // ---- ports for the subsystems that are not committed core traits ---------------------
 
@@ -242,6 +246,11 @@ pub struct Orchestrator {
     dap: Dap,                            // the accountable party stamped on audit records
     guards: Guards,                      // 13-FIX: driver-layer guards (config)
     guard_state: Mutex<GuardState>,      // 13-FIX: their mutable state (interior mutability)
+    // ---- AMD-011 Capability-Triggered Assurance ----
+    envelope: CapabilityEnvelope, // P-12.2: what the composed system can do (config)
+    egress_rules: Option<Vec<EgressRule>>, // P-12.4: extracted from the signed manifest, fast lookup
+    kill_flag: Arc<AtomicBool>, // P-12.5: independent termination — lock-free, model cannot reach it
+    trajectory: Mutex<Vec<TrajectoryEntry>>, // P-12.8: the ordered session trajectory
 }
 
 impl Orchestrator {
@@ -273,6 +282,13 @@ impl Orchestrator {
             dap,
             guards: Guards::production(),
             guard_state: Mutex::new(GuardState::default()),
+            // AMD-011 defaults: a permissive (unenforcing) envelope with no egress manifest, no
+            // kill signal, and an empty trajectory. A deployment supplies its attested envelope via
+            // `.with_envelope()` (the `.with_guards()` pattern), so existing composition is unchanged.
+            envelope: CapabilityEnvelope::permissive(),
+            egress_rules: None,
+            kill_flag: Arc::new(AtomicBool::new(false)),
+            trajectory: Mutex::new(Vec::new()),
         }
     }
 
@@ -282,6 +298,41 @@ impl Orchestrator {
     pub fn with_guards(mut self, guards: Guards) -> Self {
         self.guards = guards;
         self
+    }
+
+    /// Install the system's [`CapabilityEnvelope`] (AMD-011). `new` defaults to
+    /// [`CapabilityEnvelope::permissive`] (no egress enforcement); a deployment (or a test)
+    /// supplies its attested envelope here. The signed egress manifest, if present, is extracted
+    /// once for fast per-hop lookup (P-12.4). The caller is responsible for having validated the
+    /// envelope ([`CapabilityEnvelope::validate`]) — this does not re-verify the signature.
+    #[must_use]
+    pub fn with_envelope(mut self, envelope: CapabilityEnvelope) -> Self {
+        self.egress_rules = envelope.egress_manifest.as_ref().map(|m| m.rules.clone());
+        self.envelope = envelope;
+        self
+    }
+
+    /// P-12.5 — independent termination. Returns a handle any thread (a signal handler, a watchdog,
+    /// a DAP command) can set to stop the orchestrator, without the model's cooperation. The model
+    /// never sees the flag, cannot influence it, cannot delay it, and cannot route around it —
+    /// [`execute_hop`](Self::execute_hop) checks it before any gate on every call.
+    pub fn kill_handle(&self) -> Arc<AtomicBool> {
+        self.kill_flag.clone()
+    }
+
+    /// P-12.8 — the session trajectory: the ordered, complete sequence of every hop attempt
+    /// (executed, denied, or errored), each carrying its evidence provenance. Returned as an owned
+    /// snapshot for export / audit.
+    pub fn trajectory(&self) -> Vec<TrajectoryEntry> {
+        self.trajectory
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    /// The composed system's declared capability envelope (AMD-011 P-12.2).
+    pub fn envelope(&self) -> &CapabilityEnvelope {
+        &self.envelope
     }
 
     /// Recover the guard state without panicking on a poisoned lock.
@@ -377,12 +428,49 @@ impl Orchestrator {
     /// (I-13) and threaded to every subsystem that evaluates time. A denial at any step stops the
     /// cycle: the later steps do not run, and the outcome names the stage.
     pub fn execute_hop(&self, req: HopRequest, now: Timestamp) -> HopResult {
+        let mut action_taken: Option<Action> = None;
+        let result = self.run_hop(req, now, &mut action_taken);
+        // P-12.8 — every hop attempt (whatever its outcome) is appended to the trajectory, with its
+        // evidence provenance, so the session is reconstructable.
+        self.record_trajectory(action_taken, &result, now);
+        result
+    }
+
+    /// The governed cycle body (§5 steps 2–8). Returns the [`HopResult`] and, via `action_out`, the
+    /// proposed action once MÍMIR has proposed one — so [`execute_hop`](Self::execute_hop) can record
+    /// the trajectory entry (P-12.8) for every outcome, including a pre-proposal denial.
+    fn run_hop(
+        &self,
+        req: HopRequest,
+        now: Timestamp,
+        action_out: &mut Option<Action>,
+    ) -> HopResult {
+        // ---- P-12.5 — independent termination, before EVERY gate ---------------------
+        // A lock-free `AtomicBool` any external thread can set; the model never sees it and cannot
+        // route around it. This is the very first thing the cycle does — ahead of the guards, the
+        // crossing, and every deterministic gate.
+        if self.kill_flag.load(Ordering::Acquire) {
+            return HopResult::Denied {
+                stage: DenialStage::Gate,
+                reason: "independent termination activated".to_string(),
+            };
+        }
+
         let HopRequest {
             identity,
             chain,
             context,
             dest,
         } = req;
+
+        // ---- P-12.4 — deterministic default-deny egress ------------------------------
+        // A sibling to HÚÐ: if the crossing targets a declared network destination, it must appear
+        // in the signed egress manifest, else deny. A no-op when no manifest is configured, or when
+        // the destination is not a network host — the current filesystem tools produce local
+        // destinations, and the BIFRÖST reasoner crossing is gated by HÚÐ / effective authorization.
+        if let Some(stop) = self.check_egress(&dest) {
+            return stop;
+        }
 
         // ---- 13-FIX driver-layer guards (before any gate) ----------------------------
         // Rate limit (F-7), monotonic time (F-9), and chain replay (F-1). A guarded-out hop never
@@ -462,6 +550,8 @@ impl Orchestrator {
             now,
         );
         let action = proposal.action;
+        // P-12.8 — hand the proposed action back to `execute_hop` for the trajectory record.
+        *action_out = Some(action.clone());
 
         // ---- 13-FIX F-3: reject an oversized detail before any gate runs --------------
         if action.detail.len() > MAX_DETAIL_BYTES {
@@ -649,6 +739,84 @@ impl Orchestrator {
             self.dap.clone(),
             now,
         );
+    }
+
+    /// P-12.4 — deterministic default-deny egress. Returns `Some(Denied)` when the crossing targets
+    /// a **network** destination absent from the signed egress manifest; `None` to proceed.
+    ///
+    /// A no-op when no manifest is configured (`egress_rules` is `None` — the permissive default),
+    /// or when the destination is not a network host. `Destination::Reasoner` (the model crossing,
+    /// gated by HÚÐ / effective authorization) and `Destination::LocalPath` (the current filesystem
+    /// tools) are not manifest-gated here; a future `Destination::Network` tool **is**. The check is
+    /// present and correct so such a tool is gated the moment it exists.
+    fn check_egress(&self, dest: &Destination) -> Option<HopResult> {
+        let rules = self.egress_rules.as_ref()?;
+        let host = match dest {
+            Destination::Network { host, .. } => host.as_str(),
+            _ => return None,
+        };
+        if rules.iter().any(|r| r.destination == host) {
+            None
+        } else {
+            Some(HopResult::Denied {
+                stage: DenialStage::Barrier,
+                reason: "destination not in egress manifest".to_string(),
+            })
+        }
+    }
+
+    /// P-12.8 — append one entry to the session trajectory. Every hop attempt is recorded, whatever
+    /// its outcome; a pre-proposal denial (kill flag, egress, guards, crossing) has no proposed
+    /// action, so a `(no-action)` marker stands in its place. The evidence provenance states that
+    /// **the orchestrator** captured this, through `execute_hop`, with its own clock — the honest
+    /// limitation (the orchestrator is the sensor, so the evidence rests on its integrity; F-23) is
+    /// stated in the record rather than hidden (the Organ 5 evidence-provenance patch).
+    fn record_trajectory(&self, action: Option<Action>, result: &HopResult, now: Timestamp) {
+        let mut traj = self.trajectory.lock().unwrap_or_else(|p| p.into_inner());
+        let sequence = traj.len() as u64;
+        let (action, tool_id) = match action {
+            Some(a) => {
+                let tool = a.tool.clone();
+                (a, tool)
+            }
+            None => {
+                let none = brokkr_core::ids::ToolId::new("(no-action)");
+                (
+                    Action {
+                        tool: none.clone(),
+                        detail: String::new(),
+                    },
+                    none,
+                )
+            }
+        };
+        let outcome = match result {
+            HopResult::Executed { output } => TrajectoryOutcome::Executed {
+                output: output.clone(),
+            },
+            HopResult::Denied { stage, reason } => TrajectoryOutcome::Denied {
+                stage: format!("{stage:?}"),
+                reason: reason.clone(),
+            },
+            HopResult::Error { detail } => TrajectoryOutcome::Error {
+                detail: detail.clone(),
+            },
+        };
+        traj.push(TrajectoryEntry {
+            sequence,
+            action,
+            tool_id,
+            outcome,
+            timestamp: now,
+            provenance: EvidenceProvenance {
+                sensor_id: "orchestrator".to_string(),
+                capture_path: "execute_hop".to_string(),
+                capture_timestamp: now,
+                expected_coverage: "full_hop".to_string(),
+                observed_coverage: "full_hop".to_string(),
+                evidence_gap: None,
+            },
+        });
     }
 }
 
