@@ -98,6 +98,7 @@ pub mod adapt;
 pub mod barrier;
 pub mod classification;
 pub mod crypto;
+pub mod explanation;
 pub mod gate;
 pub mod genome;
 pub mod ids;
