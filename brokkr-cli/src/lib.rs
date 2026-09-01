@@ -85,6 +85,21 @@ pub trait Sentinel: Send + Sync {
 /// (and would halt the hop / emit a chain-break). Phase 11 uses an in-memory spy.
 pub trait AuditSink: Send + Sync {
     fn record(&self, event: AuditEvent, dap: Dap, at: Timestamp);
+
+    /// Record an event with explicit **evidence-source provenance** (Organ 5 evidence-capture
+    /// patch): how it was captured, by what sensor, through what path. The default drops the
+    /// provenance and calls [`record`](Self::record), so existing sinks are unaffected; a
+    /// provenance-aware sink (a SAGA adapter that calls `append_with_provenance`, or a test spy that
+    /// inspects it) overrides this. The orchestrator records **only** through this method.
+    fn record_with_provenance(
+        &self,
+        event: AuditEvent,
+        dap: Dap,
+        at: Timestamp,
+        _provenance: EvidenceProvenance,
+    ) {
+        self.record(event, dap, at);
+    }
 }
 
 /// Where HEIMDALL's raise-only [`Signal`]s go (§5 step 9): EIR (resolution) and KVASIR
@@ -493,7 +508,7 @@ impl Orchestrator {
         let cleared: ClearedContext = match self.crossing.clear(context, &dest, now) {
             Ok(c) => c,
             Err(verdict) => {
-                self.audit.record(
+                self.audit.record_with_provenance(
                     AuditEvent::BarrierCrossing(BarrierCrossing {
                         verdict: verdict.clone(),
                         flow: crossing_flow.clone(),
@@ -502,6 +517,7 @@ impl Orchestrator {
                     }),
                     self.dap.clone(),
                     now,
+                    self.provenance("execute_hop::after_bifrost", now),
                 );
                 self.sentinel.observe(
                     &Observation::Crossing {
@@ -534,7 +550,7 @@ impl Orchestrator {
         // The sanitization is on the *audit copy only*; the real `action.detail` handed to the
         // barrier and tool below is untouched.
         let input_derivative = Sha384Hasher.hash(cleared.get().payload.as_bytes());
-        self.audit.record(
+        self.audit.record_with_provenance(
             AuditEvent::Proposal(ProposalRecord {
                 model: ModelIdentity {
                     name: self.reasoner.endpoint().as_str().to_string(),
@@ -548,6 +564,7 @@ impl Orchestrator {
             }),
             self.dap.clone(),
             now,
+            self.provenance("execute_hop::after_reasoner", now),
         );
         let action = proposal.action;
         // P-12.8 — hand the proposed action back to `execute_hop` for the trajectory record.
@@ -649,7 +666,7 @@ impl Orchestrator {
         match self.barrier.evaluate(&action_flow, now) {
             BarrierVerdict::Allow | BarrierVerdict::AcceptedRisk { .. } => {}
             blocking => {
-                self.audit.record(
+                self.audit.record_with_provenance(
                     AuditEvent::BarrierCrossing(BarrierCrossing {
                         verdict: blocking.clone(),
                         flow: action_flow.clone(),
@@ -658,6 +675,7 @@ impl Orchestrator {
                     }),
                     self.dap.clone(),
                     now,
+                    self.provenance("execute_hop::after_barrier", now),
                 );
                 self.sentinel.observe(
                     &Observation::Crossing {
@@ -719,8 +737,14 @@ impl Orchestrator {
         for detection in &detections {
             if let Some(signal) = &detection.signal {
                 self.signals.route(signal);
-                self.audit
-                    .record(AuditEvent::Signal(signal.clone()), self.dap.clone(), now);
+                // The signal originated in HEIMDALL's observation; the orchestrator is the recorder,
+                // so the sensor is the orchestrator and the capture path names the HEIMDALL origin.
+                self.audit.record_with_provenance(
+                    AuditEvent::Signal(signal.clone()),
+                    self.dap.clone(),
+                    now,
+                    self.provenance("execute_hop::after_tool::heimdall_observe", now),
+                );
             }
         }
 
@@ -731,14 +755,32 @@ impl Orchestrator {
 
     /// Record a SINDRI/REGIN authorization decision to SAGA.
     fn record_authorization(&self, action: &Action, outcome: AuthorizationOutcome, now: Timestamp) {
-        self.audit.record(
+        self.audit.record_with_provenance(
             AuditEvent::Authorization(AuthorizationRecord {
                 action: action.clone(),
                 outcome,
             }),
             self.dap.clone(),
             now,
+            self.provenance("execute_hop::after_gate", now),
         );
+    }
+
+    /// Organ 5 evidence-capture patch — the evidence-source provenance the orchestrator attaches to
+    /// every audit record it writes. `sensor_id` is `"orchestrator"` because the orchestrator is the
+    /// recorder: it is in the trusted computing base (F-23), and the patch requires that to be
+    /// **stated** in the record, not hidden. `capture_path` names where in `execute_hop` the record
+    /// was captured. A production deployment with an independent audit sensor states a different
+    /// `sensor_id`.
+    fn provenance(&self, capture_path: &str, now: Timestamp) -> EvidenceProvenance {
+        EvidenceProvenance {
+            sensor_id: "orchestrator".to_string(),
+            capture_path: capture_path.to_string(),
+            capture_timestamp: now,
+            expected_coverage: "full_hop".to_string(),
+            observed_coverage: "full_hop".to_string(),
+            evidence_gap: None,
+        }
     }
 
     /// P-12.4 — deterministic default-deny egress. Returns `Some(Denied)` when the crossing targets
@@ -790,6 +832,15 @@ impl Orchestrator {
                 )
             }
         };
+        // Organ 5 patch — an errored hop did not complete, so the evidence of what happened is
+        // incomplete: record the gap explicitly rather than presenting a partial record as complete.
+        let (observed_coverage, evidence_gap) = match result {
+            HopResult::Error { detail } => (
+                "partial_hop".to_string(),
+                Some(format!("hop errored before completion: {detail}")),
+            ),
+            _ => ("full_hop".to_string(), None),
+        };
         let outcome = match result {
             HopResult::Executed { output } => TrajectoryOutcome::Executed {
                 output: output.clone(),
@@ -813,8 +864,8 @@ impl Orchestrator {
                 capture_path: "execute_hop".to_string(),
                 capture_timestamp: now,
                 expected_coverage: "full_hop".to_string(),
-                observed_coverage: "full_hop".to_string(),
-                evidence_gap: None,
+                observed_coverage,
+                evidence_gap,
             },
         });
     }

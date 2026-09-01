@@ -20,6 +20,7 @@
 
 use std::sync::Mutex;
 
+use brokkr_core::capability::EvidenceProvenance;
 use brokkr_core::crypto::{Digest, DualSignature, Hasher, Signature, SignatureAlg};
 use brokkr_core::ids::{Dap, Nonce, OrganId, RiskAcceptanceId, SubjectId, Timestamp};
 use brokkr_core::personal_data::{Purpose, RetentionPeriod};
@@ -105,6 +106,20 @@ fn verify_under(key: &PublicBytes, msg: &[u8], sig: &DualSignature) -> bool {
     match DualPublicKey::from_public_bytes(&key.0, &key.1) {
         Ok(pk) => pk.verify_dual(msg, sig).is_ok(),
         Err(_) => false,
+    }
+}
+
+/// The provenance [`append`](Saga::append) attaches when the caller supplies none: SAGA's own
+/// self-report of the append. A caller with a real observation path uses
+/// [`append_with_provenance`](Saga::append_with_provenance) and states the true sensor and path.
+fn default_provenance(at: Timestamp) -> EvidenceProvenance {
+    EvidenceProvenance {
+        sensor_id: String::from("saga"),
+        capture_path: String::from("saga::append"),
+        capture_timestamp: at,
+        expected_coverage: String::from("record"),
+        observed_coverage: String::from("record"),
+        evidence_gap: None,
     }
 }
 
@@ -209,6 +224,20 @@ impl Saga {
     /// and pushed as the first [`GenerationSignature`], and a timestamp is attached or its
     /// absence recorded. Returns the new record's `seq`.
     pub fn append(&self, event: AuditEvent, dap: Dap, at: Timestamp) -> Result<u64, SagaError> {
+        self.append_with_provenance(event, dap, at, default_provenance(at))
+    }
+
+    /// Append a record carrying explicit evidence-source provenance (Organ 5 evidence-capture
+    /// patch). The orchestrator supplies per-event provenance (which sensor, which capture path);
+    /// [`append`](Self::append) is the convenience that defaults it to a `saga`/`saga::append`
+    /// self-report. Provenance is part of the signed content, so it is signed and hash-chained.
+    pub fn append_with_provenance(
+        &self,
+        event: AuditEvent,
+        dap: Dap,
+        at: Timestamp,
+        provenance: EvidenceProvenance,
+    ) -> Result<u64, SagaError> {
         let mut st = self.state();
         let seq = st.records.len() as u64;
         let prev = match st.records.last() {
@@ -217,13 +246,14 @@ impl Saga {
         };
 
         // Build the record; `signatures`/`timestamping` are outside the signed content, so
-        // the placeholder values below do not affect what gets signed.
+        // the placeholder values below do not affect what gets signed. `provenance` IS signed.
         let mut record = AuditRecord {
             seq,
             prev,
             at,
             dap,
             event,
+            provenance,
             signatures: Vec::new(),
             timestamping: Timestamping::Unavailable {
                 reason: String::from("pending"),

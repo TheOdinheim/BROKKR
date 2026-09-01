@@ -17,6 +17,7 @@ use brokkr_core::adapt::{DetectorProvenance, RefinedDetector};
 use brokkr_core::barrier::BarrierVerdict;
 use brokkr_core::barrier::BoundaryFlow;
 use brokkr_core::barrier::PersonalDataTag;
+use brokkr_core::capability::EvidenceProvenance;
 use brokkr_core::classification::Classification;
 use brokkr_core::crypto::{Digest, DualSignature};
 use brokkr_core::gate::{Action, AnergyReason};
@@ -191,6 +192,14 @@ pub struct AuditRecord {
     /// The accountable natural person (OQGF-A-5).
     pub dap: Dap,
     pub event: AuditEvent,
+    /// Evidence-source provenance (Organ 5 evidence-capture hardening patch): **how** this record
+    /// was captured — the sensor, the capture path, the sensor's timestamp, the coverage, and an
+    /// explicit gap where coverage is incomplete. **Part of the signed content**: unlike the
+    /// accumulating `signatures` (which is why Rev 1.10 excludes them), provenance is set once at
+    /// capture, so it is signed and hash-chained — a non-key-holder cannot alter it undetected.
+    /// The governed system SHALL NOT be the authority over its own evidence; where the orchestrator
+    /// is itself the sensor, that is stated in `sensor_id` (F-23), never hidden.
+    pub provenance: EvidenceProvenance,
     /// Signatures ACCUMULATE across cryptographic generations (OQGF-A-6); the first is the
     /// original and is never removed. **Not** part of the signed content.
     pub signatures: Vec<GenerationSignature>,

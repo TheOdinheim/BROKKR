@@ -27,6 +27,7 @@ use brokkr_core::barrier::{
     BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
 };
+use brokkr_core::capability::EvidenceProvenance;
 use brokkr_core::classification::{ChannelStrength, Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
 use brokkr_core::gate::{Action, AnergyReason};
@@ -590,7 +591,10 @@ fn write_event(c: &mut Canon, e: &AuditEvent) {
 // ---- public: the signed content, the signal body, and the export bundle --------------
 
 /// The bytes a record's [`GenerationSignature`]s sign, the next record's `prev` digests, and
-/// a TSA token stamps: `seq`, `prev`, `at`, `dap`, `event` — and **nothing else** (Rev 1.10).
+/// a TSA token stamps: `seq`, `prev`, `at`, `dap`, `event`, and `provenance` (Rev 1.10 plus the
+/// Organ 5 evidence-capture patch — provenance is signed because it is set once at capture, not
+/// accumulated like the signatures Rev 1.10 excludes). The `signatures` and `timestamping` fields
+/// remain outside.
 pub fn record_signed_content(r: &AuditRecord) -> Vec<u8> {
     let mut c = Canon::new();
     c.bytes(DOMAIN_RECORD);
@@ -599,7 +603,25 @@ pub fn record_signed_content(r: &AuditRecord) -> Vec<u8> {
     c.u64(r.at.0);
     write_dap(&mut c, &r.dap);
     write_event(&mut c, &r.event);
+    write_provenance(&mut c, &r.provenance);
     c.finish()
+}
+
+/// Canonically encode the evidence-source provenance (Organ 5 patch). Every variable-length field
+/// is length-prefixed; the optional gap is a presence byte then the bytes.
+fn write_provenance(c: &mut Canon, p: &EvidenceProvenance) {
+    c.bytes(p.sensor_id.as_bytes());
+    c.bytes(p.capture_path.as_bytes());
+    c.u64(p.capture_timestamp.0);
+    c.bytes(p.expected_coverage.as_bytes());
+    c.bytes(p.observed_coverage.as_bytes());
+    match &p.evidence_gap {
+        None => c.u8(0),
+        Some(g) => {
+            c.u8(1);
+            c.bytes(g.as_bytes());
+        }
+    }
 }
 
 /// The bytes a chain-break [`Signal`]'s signature covers — the signal body, excluding its own
