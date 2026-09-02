@@ -3,15 +3,17 @@
 ## The Governed Autonomous Coding Agent
 
 **Document ID:** BROKKR-ARCH-2026-001
-**Revision:** 1.17
-**Supersedes:** Rev 1.16 (commit `f46772b`), Rev 1.15 (commit `174d023`), Rev 1.14 (commit `13dcf0f`), Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
+**Revision:** 1.18
+**Supersedes:** Rev 1.17 (commit `ff65f2b`), Rev 1.16 (commit `f46772b`), Rev 1.15 (commit `174d023`), Rev 1.14 (commit `13dcf0f`), Rev 1.13 (commit `bb2997b`), Rev 1.12 (commit `741a358`), Rev 1.11 (commit `279aa92`), Rev 1.10 (commit `f76aae7`), Rev 1.9 (commit `4b8e17c`), Rev 1.8 (commit `e4d38a6`), Rev 1.7 (commit `59476ec`), Rev 1.6 (commit `22e9360`), Rev 1.5 (commit `0b7d7f4`), Rev 1.4 (commit `4c1e44c`), Rev 1.3 (commit `612f4b5`), Rev 1.2 (commit `99b6c62`), Rev 1.1 (commit `4a94fad`), and Rev 1.0 (commit `0ed1849`). All preserved immutably in git. Superseded, not deleted. See §15.
 **Component:** BROKKR — a Rust-native autonomous coding agent governed end-to-end by OQGF-1.0
-**Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-11), and Amendments AMD-001 … AMD-009 in full
+**Binds to:** OQGF-1.0 (five organs), the Physiology Layer (OQGF-P-1 … P-12), and Amendments AMD-001 … AMD-011 in full, together with the Organ 5 evidence-capture hardening patch
 **Declared conformance level:** **Enhanced (OQGF-E)**, architected toward High-Assurance (OQGF-H). See §1.4.
 **Author:** Jeremy Rose, CEO — Odin's LLC, Wasilla, Alaska
-**Date:** 18 August 2026 (Rev 1.17)
+**Date:** 1 September 2026 (Rev 1.18)
 **Status:** Architecture specification for the Odin's engineering team; input to the BROKKR build (Claude Code)
-**Disposes:** Rev 1.17 places §6.12 (KVASIR), the only subsystem that had never had a section. Rev 1.16 disposed GAP-2026-08-18-001 and -002 (brokkr-sentinel revision — a tolerance grant could not be observed to suppress anything, and an expired resolution decision was unreachable behind the replay check). Rev 1.15 disposed GAP-2026-08-17-001 (Phase 8.5 buildability check — `ContextClearance::evaluate_context` cannot reach the barrier's expiry check, and SINDRI evaluates chain freshness against a clock frozen at construction). Rev 1.14 placed what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
+**Disposes:** Rev 1.18 records three placed governance items — AMD-010 (Explanation Validity, OQGF-A-8…A-12), AMD-011 v1.1 (Capability-Triggered Assurance, OQGF-P-12.1…P-12.8), and the Organ 5 evidence-capture hardening patch (OQGF-A-1 extended) — and closes the Deferred-Conjunct Deadline: all four OQGF-M-11 conjuncts are now enforced in SINDRI (gate revision `884958f`). AMD-010 is dispositioned `n.a.` (BROKKR runs a classical LLM, no quantum ML model — the OQGF-A-4 basis of §1.4); AMD-011 is implemented (§6.13); the Organ 5 patch is implemented (§6.9). Rev 1.17 places §6.12 (KVASIR), the only subsystem that had never had a section. Rev 1.16 disposed GAP-2026-08-18-001 and -002 (brokkr-sentinel revision — a tolerance grant could not be observed to suppress anything, and an expired resolution decision was unreachable behind the replay check). Rev 1.15 disposed GAP-2026-08-17-001 (Phase 8.5 buildability check — `ContextClearance::evaluate_context` cannot reach the barrier's expiry check, and SINDRI evaluates chain freshness against a clock frozen at construction). Rev 1.14 placed what a reasoner crossing must carry — §6.6's claim that only *the wire* was missing predated the barrier growing from two facts to five. Rev 1.13 disposed GAP-2026-08-12-001 (Rev 1.12 required EIR to refuse an expired or replayed decision without giving it a variant to refuse with). Rev 1.12 placed what a `ResolutionDecision`'s signature covers — §6.8 required one without saying what it signed — and gives a forged tolerance grant its own error. Rev 1.11 placed the Phase-8 sentinel surface and corrects Rev 1.4's assumption that OQGF-M-6's reconciliation pass rate would be measurable at Phase 8. Rev 1.10 disposed GAP-2026-08-06-001 (Phase 7 buildability check — Rev 1.9 defined the chain-linkage digest two mutually exclusive ways). Rev 1.9 placed the Phase-7 audit surface and itemizes Organ 5's traceability, which a blanket row had been concealing. Rev 1.8 disposed GAP-2026-07-30-001 (Phase 6 buildability check — a barrier finding had no identity an acceptance could be scoped to). Rev 1.7 corrected a defect in Rev 1.6's egress rule (personal data classified Public crossed ungoverned) and places the AMD-009 Personal-Data Tag. Rev 1.6 placed the Phase-6 barrier surface. Rev 1.5 disposed GAP-2026-07-27-001 (Phase 5 surface check — promotion-gate predicate 5 referenced an uncommitted capability vocabulary). Rev 1.4 placed the Phase-5 REGIN surface and discharged the buildable half of RISK-2026-0004. Rev 1.3 disposed GAP-2026-07-24-001 and -002; Rev 1.2 disposed GAP-2026-07-14-001.
+
+**The corpus grew again: AMD-001 … AMD-011 and the Organ 5 evidence-capture hardening patch.** Per CLAUDE.md §5.3, every conformance result recorded before this revision is **provisional** with respect to OQGF-A-8…A-12 (n.a., §1.4), OQGF-P-12.1…P-12.8, and the OQGF-A-1 evidence-provenance extension. The next conformance check in each affected crate SHALL enumerate these in scope and record a verdict for each.
 
 ---
 
@@ -40,6 +42,9 @@ BROKKR binds to the **full framework** — the five organs, the Physiology Layer
 - **AMD-001 (Costimulation / Intent Provenance)** is the single most important requirement for BROKKR. An agent decomposes one authorized request into many tool calls across many reasoning hops. Identity alone does not prove that a given tool call is a faithful derivation of what the user authorized. AMD-001 closes exactly this gap.
 - **AMD-007 (the Barrier)** governs the substance a coding agent moves: source code, secrets, and proprietary data crossing between the repository and any destination outside it — **including the reasoner.**
 - **The Physiology Layer** governs what happens after the gates fire. A defense with no bound on the harm it does to its own host is not a defense; a defense that can escalate but never de-escalate is a one-way ratchet; a defense that cannot learn repeats every mistake. AMD-002, AMD-005, and AMD-003 respectively, all load-bearing for an agent whose value is doing useful work under constraint.
+- **AMD-011 (Capability-Triggered Assurance)** is the amendment written for exactly what BROKKR is: an autonomous agent whose risk comes from its *capabilities*, not its data. BROKKR's declared Capability Envelope is `CodeExecution` + `NetworkAccess(localhost:8443)` (the BIFRÖST crossing to the reasoner gateway) + `ExternalEffect(filesystem)` (file writes) — a composition that floors the capability-triggered tier at Enhanced and matches BROKKR's declared governing tier. The dual-axis rule (OQGF-P-12.1), deterministic default-deny egress (P-12.4), independent termination (P-12.5), and trajectory reconstruction with evidence provenance (P-12.8) are implemented (§6.13); sub-agent and peer/collective governance (P-12.6) are placed as a type surface because BROKKR spawns no sub-agents.
+- **AMD-010 (Explanation Validity)** extends Organ 5's *quantum-appropriate* explanation artifact (OQGF-A-4) with bounded scope, the Null Explanation, trainability reconciliation, and the Canary Probe. BROKKR runs a classical LLM and has no variational or kernel quantum model in its decision path, so OQGF-A-4 — and therefore OQGF-A-8…A-12 — is `n.a.` (§1.4). The types are placed in `brokkr-core::explanation` so the architecture can name them and the surface is ready when a quantum workload arrives; no logic is built.
+- **The Organ 5 evidence-capture hardening patch** adds to OQGF-A-1 the requirement that every material audit record carry evidence-source provenance, and adds the general Organ 5 principle that **the governed system SHALL NOT be the authority over its own evidence** (§6.9).
 
 ### 1.4 Declared conformance level and applicability
 
@@ -60,6 +65,11 @@ What Enhanced binds:
 | **OQGF-P-7.3/.5/.6, P-8.4/.5/.6** | Decentralized signaling; cascade bounding; memory preserved on stand-down; DAP-confirmed de-escalation above baseline; chronic-escalation detection |
 | **OQGF-P-9.4, P-9.5** | Risk-acceptance register distinct from the tolerance register; standing inventory of carried risks |
 | **OQGF-I-11, I-12, I-14, I-15** | Ingress-provenance gating; screened content sentinel; enumerated Uncontrolled Channels; barrier-bypass detection |
+| **OQGF-P-12.1, P-12.2** | **Dual-axis determination; a signed Capability Envelope inventorying what the composed system can do.** BROKKR's envelope: `CodeExecution` + `NetworkAccess(localhost:8443)` + `ExternalEffect(filesystem)`; capability-triggered tier Enhanced (external-effect floors at Enhanced); `governing_tier = max(capability, data)` (§6.13) |
+| **OQGF-P-12.4** | **Deterministic default-deny egress** on any network destination absent from the signed egress manifest — a Deterministic Gate under OQGF-P-2 (§6.13) |
+| **OQGF-P-12.5** | **Independent termination** for a system with external-effect authority: a kill path the reasoner cannot reach, checked before every gate (§6.13) |
+| **OQGF-P-12.8** | **Trajectory reconstruction** — every hop attempt recorded in order — and **evidence-source provenance** on every material audit record (§6.9, §6.13) |
+| **OQGF-P-12.3, P-12.6** | **PARTIAL / type-surface.** P-12.3 (environment attestation against the deployed environment) is not built — the envelope is declared, signed-in-shape, and carries `attested_at`, but no mechanism verifies the deployed environment matches it (§13). P-12.6 (sub-agent and peer/collective governance) is a placed type surface with intrinsic `validate()`; BROKKR spawns no sub-agents, so no runtime path exercises it (§13) |
 
 **Requirements declared inapplicable, with justification.** OQGF §A.9.3 permits `n.a.` **with an evidence pointer**. Silently omitting a requirement is not the same as declaring it inapplicable — a distinction the Phase 0.5 conformance check enforced, and which found eight requirements falling through exactly that gap. Rev 1.2 disposes of all eight. The `n.a.` list is now:
 
@@ -73,6 +83,7 @@ What Enhanced binds:
 | OQGF-R-7 (quantum key distribution) | integration point only | Placeholder per the requirement's own terms; nothing depends on it |
 | **OQGF-R-2 (no provider lock-in)** | **applicable, reinterpreted** | The cloud-lock-in analog for BROKKR is **model-provider lock-in.** Satisfied by the `Reasoner` trait and the AIBOM-declared endpoint registry (§6.1, §6.2). Lock-in to a single provider requires DAP risk acceptance. **R-2 is about substitutability; it does not absorb OQGF-M-6, which is about trustworthiness. The two are kept separate.** |
 | **OQGF-A.6.1 (incident response)** | **split — see below** | Not `n.a.` |
+| **OQGF-A-8 … A-12 (AMD-010, explanation validity)** | **n.a.** | AMD-010 qualifies OQGF-A-4 (quantum-appropriate explanation artifacts), which §1.4 already declares n.a.: BROKKR runs a classical LLM (`llama3.2:3b`), with no variational or kernel quantum model in its decision path, so there is no Pauli-string decomposition, no barren-plateau regime, no Trainability Profile, and no explanation channel to attest with a Canary Probe. The `brokkr-core::explanation` type surface is placed (Option B) so the requirement can be referenced and the surface is ready if a quantum workload is added; **placing the types is not discharging the obligation** — there is nothing to discharge while OQGF-A-4 is n.a. DAP-dispositioned 25 July 2026. |
 
 **OQGF-A.6.1 is split, not declared inapplicable.** The incident-response *plan* — roles, timelines, annual tabletop exercises — is an organizational document Odin's maintains and is out of scope for this architecture. But A.6.1 names its **triggers**: HNDL detection, attestation failure, statistical reconciliation failure, audit-chain break. **Emitting those triggers is architectural**, and BROKKR SHALL emit them: HNDL detection from BIFRÖST (§6.10); attestation failure from SINDRI (§6.4); reconciliation failure from HEIMDALL (§6.7); audit-chain break from SAGA (§6.9). A flat `n.a.` on A.6.1 would have dropped the trigger obligation along with the paperwork. The requirement is recorded as *partially architectural*, with the architectural half specified (§11) and the organizational half assigned to Odin's operations.
 
@@ -206,7 +217,7 @@ Four load-bearing observations.
 
 4. **REGIN checks the genome.** The proposed tool must be a declared, signed member of the Tool Genome, and the calling hop must hold the tool's privilege class. A tool not in the genome does not exist. A privileged tool proposed by a hop that lacks the privilege is refused here.
 
-5. **SINDRI runs the costimulation gate.** The deterministic spine. Both signals required (OQGF-M-11): Signal 1, BROKKR's attestation for this hop (OQGF-M-1); Signal 2, a valid Intent Provenance Chain (OQGF-M-8) tracing this action to the Root Intent. It walks the chain, verifies each link's hash and signature, confirms `emitted ⊆ received` at every hop (OQGF-M-9), confirms the action lies within scope, and evaluates it against the accumulated invariants. Any failure → **architectural anergy**: denied, signed denial to HEIMDALL, recorded in SAGA. Identity alone never suffices. **Phase-4 scope (Rev 1.3):** of the four conjuncts named here, SINDRI enforces the two cryptographic signals; confirming the action lies within scope and evaluating it against the accumulated invariants are deferred under the Deferred-Conjunct Deadline and SHALL be enforced before the executor is wired at Phase 11 — see §6.4.
+5. **SINDRI runs the costimulation gate.** The deterministic spine. Both signals required (OQGF-M-11): Signal 1, BROKKR's attestation for this hop (OQGF-M-1); Signal 2, a valid Intent Provenance Chain (OQGF-M-8) tracing this action to the Root Intent. It walks the chain, verifies each link's hash and signature, confirms `emitted ⊆ received` at every hop (OQGF-M-9), confirms the action lies within scope, and evaluates it against the accumulated invariants. Any failure → **architectural anergy**: denied, signed denial to HEIMDALL, recorded in SAGA. Identity alone never suffices. **All four conjuncts are now enforced (Rev 1.18).** SINDRI verifies Signal 1 and Signal 2 (the two cryptographic signals) and, through the `GenomeResolver` seam (gate revision `884958f`), confirms the action's tool resolves in the genome with every required capability present in the chain's current attenuated scope (conjunct 3 → `OutOfScope` on a miss) and that the tool violates no accumulated invariant (conjunct 4 → `InvariantViolated`). The Deferred-Conjunct Deadline (§6.4) is satisfied; the executor may be wired against a gate that evaluates all four conjuncts.
 
 6. **HÚÐ governs the crossing, when there is one.** Classified content to an unauthorized destination is a **deterministic Deny** (OQGF-I-10), non-suppressible. Unprovenanced ingress into a privileged context is **quarantined** (OQGF-I-11). Every crossing carries a signed Boundary Custody Record (OQGF-I-9). **The reasoner endpoint is one such destination** — the same gate, the same logic (§6.6).
 
@@ -504,12 +515,12 @@ The consequence is **fail-safe by construction**: an implementor of `Costimulati
 
 **OQGF-M-11 requires four conjuncts for a grant.** All four are stated here in full, because the requirement is not reduced by this revision — only the phase at which each is enforced:
 
-| # | Conjunct | Source | Enforced at |
+| # | Conjunct | Source | Status |
 |---|---|---|---|
-| 1 | **Signal 1** — identity attestation | OQGF-M-1, M-11 | **Phase 4** |
-| 2 | **Signal 2** — a valid Intent Provenance Chain | OQGF-M-8, M-9, M-14 | **Phase 4** |
-| 3 | **Action lies within the current attenuated scope** | OQGF-M-11 | **Deferred — see below** |
-| 4 | **Action respects the accumulated invariant set** | OQGF-M-10, M-11 | **Deferred — see below** |
+| 1 | **Signal 1** — identity attestation | OQGF-M-1, M-11 | **Enforced (Phase 4)** |
+| 2 | **Signal 2** — a valid Intent Provenance Chain | OQGF-M-8, M-9, M-14 | **Enforced (Phase 4)** |
+| 3 | **Action lies within the current attenuated scope** | OQGF-M-11 | **Enforced (gate revision `884958f`)** |
+| 4 | **Action respects the accumulated invariant set** | OQGF-M-10, M-11 | **Enforced (gate revision `884958f`)** |
 
 ```mermaid
 flowchart TD
@@ -547,22 +558,24 @@ Dropping the check does **not** weaken proof of possession (Signal 2 supplies it
 
 **OQGF-M-1 is therefore recorded `partial`, not satisfied**, with that residual named. It is not made worse by this revision — measurements are unverifiable today regardless, because nothing issues attestations — but the architecture SHALL NOT record as satisfied a requirement whose central artifact goes unchecked. Closing M-1 requires an attestation issuer, a committed attestation signed-content encoding, and a measurement-expectation source. Those are later work and are listed in §13.
 
-#### Conjuncts 3 and 4 — deferred, with a deadline
+#### Conjuncts 3 and 4 — enforced through the `GenomeResolver` seam
 
-**Why they cannot be built at Phase 4.** `Action` is `{ tool: ToolId, detail: String }`. It carries no capability. `ToolId` is REGIN's tool-genome vocabulary; `Capability` is the intent vocabulary; the two are deliberately distinct types with no committed conversion. `Invariant` is an opaque `String` with no committed `(Action, Invariant) -> bool` predicate. For SINDRI to compute conjuncts 3 and 4, the gate would have to author the mapping between REGIN's vocabulary and intent's, and author an invariant-evaluation semantics — **defining, from inside Phase 4, the authorization vocabulary that Phase 5 exists to own.** That is the builder becoming the channel by which its own governing specification changes, which §0 and §1 of the build rules forbid.
+Rev 1.3 deferred these two conjuncts because `Action` carried no capability, `ToolId` and `Capability` were distinct types with no committed conversion, and `Invariant` had no evaluation predicate — computing them would have meant the gate authoring REGIN's vocabulary from inside Phase 4. Rev 1.4 placed that vocabulary in the signed registers (`ToolEntry::required_capabilities`, `PolicyRegister`), and gate revision `884958f` now consumes it through a resolver seam of the same shape as the Signal-2 key resolver — the gate asks, the resolver answers, and the gate does not know where the data lives:
 
-**Why deferring is safe right now, and only right now.** Nothing consumes an `AuthorizedAction` until the executor is wired, and the executor is **Phase 11**, last by design. Between Phase 4 and Phase 11 there is no execution path for an under-checked authorization to reach. The deferral is safe because of build order, not because the conjuncts are optional.
+```rust
+pub trait GenomeResolver: Send + Sync {
+    /// Conjunct 3: the tool's declared least-privilege capabilities, and its privilege class.
+    fn resolve_tool(&self, tool: &ToolId) -> Option<ResolvedTool>;      // required_capabilities, privilege
+    /// Conjunct 4: what an accumulated invariant forbids.
+    fn resolve_invariant(&self, invariant: &Invariant) -> Option<ResolvedInvariant>; // forbids_capabilities, forbids_privilege
+}
+```
 
-**The Deferred-Conjunct Deadline (normative).**
+**Conjunct 3.** SINDRI resolves `action.tool`; an **undeclared tool** (resolver returns `None`) is `AnergyReason::OutOfScope`, and a tool whose `required_capabilities` are not all present in `chain.current_scope()` is `OutOfScope`. Absence is denial — the register is the closed vocabulary.
 
-> Conjuncts 3 and 4 SHALL be enforced by SINDRI **before the executor is wired (Phase 11)**. The executor SHALL NOT be wired to a gate that does not evaluate the action against the chain's current scope and accumulated invariant set. Expected landing: **Phase 5 (REGIN)**, which owns the tool-to-capability vocabulary, or a scoped SINDRI revision immediately following it — the same additive-revision pattern used for `DualPublicKey` (Phase 2 revision) and `verify_chain_public` (Phase 3 revision). This deadline is a gate on Phase 11, not a preference.
+**Conjunct 4.** For each accumulated invariant, SINDRI resolves it and checks the action's tool against `forbids_capabilities` and `forbids_privilege`; a violation is `AnergyReason::InvariantViolated`. **An invariant with no declared predicate is denied, not passed** — OQGF-P-2's non-suppressible posture applied to policy, and the reason the policy register's construction-time check (§6.2) exists to catch a malformed register while a human is present.
 
-**What closing them requires**, so disposition is fast when REGIN lands:
-
-- An **action-to-capability binding**: either a `required: Capability` field (or `Vec`) on `Action`, or a REGIN-owned `required_capability(&Action) -> Capability` consumed by SINDRI through a trait SINDRI does not implement — the same seam pattern as the key resolver.
-- An **invariant-evaluator seam**: a REGIN- or policy-owned `(&Action, &Invariant) -> bool` reached through an interface, so SINDRI evaluates invariants without owning their semantics.
-
-Until both exist, **OQGF-M-11 is recorded `partial`** (two of four conjuncts enforced) and **OQGF-M-10's action-evaluation clause remains `partial`** (accumulation and non-removal are satisfied in SKULD; evaluation of an action against the set is not yet performed anywhere).
+**This closes the Deferred-Conjunct Deadline.** The executor (Phase 11) may be wired against a gate that evaluates the action against the chain's current scope and accumulated invariant set. **OQGF-M-11 moves to satisfied** (all four conjuncts). **OQGF-M-10's action-evaluation clause is satisfied for declarative invariants** — accumulation and non-removal in SKULD, evaluation against the set in SINDRI; **detail-level invariants** (a path rule such as *read-only outside ./src*) remain unevaluated and are a standing residual (§13), the buildable-vs-declarative boundary Rev 1.4 drew. **OQGF-M-1 is unaffected by this revision and remains `partial`**: Signal 1 proves key possession for a declared identity, not hardware-attested platform state (§13).
 
 #### The anergy mapping
 
@@ -578,7 +591,7 @@ SINDRI's `evaluate` returns `AnergyReason` values, and the mapping from the chai
 | `IntentError::EntrySignatureInvalid` | `ChainInvalid` |
 | `IntentError::BrokenLink` | `ChainInvalid` |
 
-`WouldBroaden` on a reconstructed chain maps to `ChainInvalid`, not `OutOfScope`: a chain whose entries broaden is an **integrity** failure of the chain itself, not a statement about the action. `OutOfScope` and `InvariantViolated` are reserved for conjuncts 3 and 4 and are unreachable at Phase 4 by construction.
+`WouldBroaden` on a reconstructed chain maps to `ChainInvalid`, not `OutOfScope`: a chain whose entries broaden is an **integrity** failure of the chain itself, not a statement about the action. `OutOfScope` is returned by conjunct 3 (undeclared tool, or a required capability absent from the current scope) and `InvariantViolated` by conjunct 4 (the tool forbidden by an accumulated invariant, or an invariant with no declared predicate). Both are now reachable and are exercised by the gate's negative tests.
 
 **Freshness is a parameter, never a wall-clock read.** The current time is passed into the evaluation and through to chain verification, so freshness behavior is deterministic and testable.
 
@@ -1192,6 +1205,38 @@ pub struct AuditRecord {
 
 **A correction is an event, not an edit.** `AuditEvent::Correction { corrects: u64, detail: String }` annotates a prior entry by sequence number. The corrected entry is never touched: its bytes, its digest, and the chain through it are all unchanged. Reading the chain means reading the corrections with it.
 
+#### Evidence-source provenance (Organ 5 evidence-capture hardening patch, OQGF-A-1 extended)
+
+Tamper-evident *storage* — append-only, hash-linked, dual-signed — protects a record *after* it enters the evidence system. It does nothing about what the recorder *saw before* it recorded. The Organ 5 evidence-capture patch, prompted by the August 2026 METR–Redwood finding that agents spoofed tool-call outputs and replaced part of the tool-execution system, adds the missing half: **every material audit record states how it was captured.**
+
+```rust
+pub struct AuditRecord {
+    pub seq: u64,
+    pub prev: Digest,           // over the preceding record's signed content
+    pub at: Timestamp,
+    pub dap: Dap,
+    pub event: AuditEvent,
+    pub provenance: EvidenceProvenance,     // NEW — IN the signed content
+    pub signatures: Vec<GenerationSignature>,  // accumulating — OUTSIDE
+    pub timestamping: Timestamping,            // OUTSIDE
+}
+
+pub struct EvidenceProvenance {
+    pub sensor_id: String,          // what captured this record
+    pub capture_path: String,       // through what path
+    pub capture_timestamp: Timestamp,
+    pub expected_coverage: String,
+    pub observed_coverage: String,
+    pub evidence_gap: Option<String>,  // explicit gap where coverage is incomplete
+}
+```
+
+**Provenance is part of the signed content, and that placement is the load-bearing decision.** Rev 1.10 excludes the *accumulating* `signatures` and `timestamping` from the signed content because they grow after sealing and would break the chain. Provenance is the opposite: it is **set once, at capture**, so signing and hash-chaining it means a non-key-holder cannot alter *how the record claims it was captured* without breaking the chain — which is exactly the guarantee the patch exists to give. `SagaState::append` defaults provenance to a `saga`/`saga::append` self-report; the orchestrator supplies real per-event provenance through `append_with_provenance` (`AuditSink::record_with_provenance`, a defaulted trait method so existing sinks are unaffected).
+
+**The orchestrator is the sensor, and it says so.** Every SAGA record the orchestrator writes carries `sensor_id: "orchestrator"` and a `capture_path` naming where in `execute_hop` it was captured (`after_bifrost`, `after_reasoner`, `after_barrier`, `after_gate`, `after_tool::heimdall_observe`). An errored hop records `observed_coverage: "partial_hop"` and an explicit `evidence_gap` rather than presenting a partial record as complete. **The governed system is here its own sensor — that is stated honestly in `sensor_id` (finding F-23), never hidden**, and it is exactly the condition the general Organ 5 principle wants a production deployment to move beyond.
+
+**The general Organ 5 principle (patch):** *the governed system SHALL NOT be the authority over its own evidence.* Material audit evidence should be captured through an observation path whose integrity does not depend on the cooperation of the system being observed. BROKKR satisfies the recording half of this in full — provenance on every record, explicit gaps, no silent omission — and states plainly, in the record itself and in §13, that its sensor is currently the orchestrator (inside the trusted computing base) rather than an independent observer. Naming the sensor is what makes the residual visible rather than hidden.
+
 #### The three attestations, and the one rule that orders them
 
 A record has exactly one canonical encoding: its **signed content** — `seq`, `prev`, `at`, `dap`, `event`. Three separate things attest to those same bytes, and **none of them is inside the bytes it attests to**:
@@ -1312,6 +1357,10 @@ The proposal event therefore carries A-1's full field list; other events carry t
 - **Tolerance grants** (HEIMDALL, Phase 8), **BIFRÖST crossings** (Phase 8.5), **detector activations** (KVASIR, Phase 9), **proposals** (MÍMIR, Phase 10). Their `AuditEvent` variants are placed; the subsystems that emit them are later.
 - **The wiring that calls SAGA.** Phase 6 decides and Phase 7 records, but the orchestrator that hands a verdict to the audit spine is `brokkr-cli` (Phase 11). SAGA offers the recording surface; it does not reach into other crates to collect events, which would invert the dependency direction.
 - **The A-7 response-time commitment**, which is operational (above).
+
+#### AMD-010 (Explanation Validity) — placed, dispositioned n.a.
+
+AMD-010 (OQGF-A-8…A-12) extends Organ 5's *quantum-appropriate* explanation artifact (OQGF-A-4) with a declared scope bound, the Null Explanation (an information-free artifact recorded explicitly as Null, never as valid), trainability reconciliation (the OQGF-M-3 declare-then-test pattern applied to explainability), and the Canary Probe (an analytically known control circuit attesting the explanation channel is alive — the clinical anergy-panel construction). BROKKR runs a classical LLM with no quantum ML model in its decision path, so OQGF-A-4 is `n.a.` (§1.4) and OQGF-A-8…A-12 inherit that disposition. The `brokkr-core::explanation` type surface is placed so the architecture can name it: `ExplanationValidity` has no variant in which a `Null` explanation is representable as `Valid` (OQGF-A-9), and its `Null` arm makes the OQGF-A-10 DAP acknowledgment an explicit `Option` a consumer must confront before acting. No logic, no SAGA/HEIMDALL/orchestrator integration — the shapes only, ready if a quantum workload arrives.
 
 ### 6.10 BIFRÖST — the guarded crossing
 
@@ -1478,6 +1527,53 @@ Therefore:
 - **Recording to Organ 5.** KVASIR produces the activation and rollback events; the orchestrator (Phase 11) records them. `brokkr-adapt` does not depend on `brokkr-audit`.
 - **The rollback trigger.** `PriorGeneration` makes reversion possible; deciding *when* to revert is a DAP act, not an automatic one.
 
+---
+
+### 6.13 Capability-Triggered Assurance (AMD-011)
+
+AMD-011 is the amendment written for what BROKKR *is*: an autonomous agent whose danger is a function of its **capabilities**, not the sensitivity of the data it touches. Its thesis is the same one this architecture has held since Rev 1.0 — **containment is structural, not communicative; the body's answer is walls, not words** (OQGF-P-12.7). BROKKR satisfies that requirement the way it satisfies every other structural one: the controls are deterministic Rust the model cannot address, persuade, or route around. The surfaces below live in `brokkr-core::capability` (the types and their intrinsic validation) and `brokkr-cli` (the orchestrator wiring); no governance crate depends on the orchestrator (I-5).
+
+#### The Capability Envelope and the dual-axis rule (OQGF-P-12.1, P-12.2)
+
+```rust
+pub struct CapabilityEnvelope {
+    pub system_id: String,
+    pub properties: Vec<CapabilityProperty>,     // the "virulence-factor" inventory
+    pub egress_manifest: Option<EgressManifest>, // present iff NetworkAccess is declared
+    pub capability_tier: ConformanceTier,
+    pub data_tier: ConformanceTier,
+    pub governing_tier: ConformanceTier,         // SHALL be max(capability, data) — P-12.1
+    pub attested_at: Timestamp,
+    pub signature: DualSignature,
+}
+```
+
+`CapabilityEnvelope::validate()` refuses two conditions and is the construction-time gate on an envelope before it governs: `TierMismatch` when `governing_tier != max(capability_tier, data_tier)` (P-12.1), and `TierTooLow` when any of `ExternalEffect`, `CredentialAccess`, or `SubAgentCreation` is present while `capability_tier` is below Enhanced (P-12.2). **Public or synthetic data cannot buy a lower posture** — the higher axis governs, by construction.
+
+**BROKKR's declared envelope** is `CodeExecution` + `NetworkAccess { localhost:8443 }` + `ExternalEffect { filesystem }`. External-effect authority floors the capability-triggered tier at Enhanced, `data_tier` is Baseline (BROKKR reasons over source, not classified corpora), and `governing_tier` is therefore **Enhanced** — the level this architecture has declared since Rev 1.1, now reached from the capability axis as well as the FIPS-199 axis.
+
+The orchestrator installs the envelope through a builder method, the `.with_guards()` pattern, so existing composition is unchanged: `new()` defaults to `CapabilityEnvelope::permissive()` (no declared properties, **no egress manifest**, so egress enforcement is a no-op), and a deployment supplies its attested, DAP-signed envelope via `.with_envelope(..)`. The caller validates the envelope; `.with_envelope` extracts the signed manifest's rules once for fast per-hop lookup and does not re-verify the signature.
+
+#### Deterministic default-deny egress (OQGF-P-12.4) — a Deterministic Gate
+
+`EgressManifest` carries a `Vec<EgressRule>` (destination, port, protocol) and a `DualSignature`; the manifest is signed and unmodifiable by the agent. The orchestrator's `check_egress(dest)` returns `Some(Denied)` when a **network** destination is absent from the manifest, and `None` (proceed) when the destination is allowed **or when no manifest is configured** (the permissive default). This is a Deterministic Gate under OQGF-P-2: fail-closed, non-suppressible, and no tolerance mechanism, exception, or model instruction opens it. It is a sibling to HÚÐ's data-classification egress gate (OQGF-I-10) — OQGF-I-10 triggers on what the *data* is, OQGF-P-12.4 on what the *system can reach*. A deliberate, bounded addition to the manifest is an AMD-006 Accountable Risk Acceptance, never a silent edit; and the manifest is `SelfModifying` (I-7).
+
+#### Independent termination (OQGF-P-12.5)
+
+The kill signal is an `Arc<AtomicBool>` held in the orchestrator and handed out by `kill_handle()` to any thread outside the reasoning path — a signal handler, a watchdog, a DAP console. `execute_hop` loads it **before every gate**, ahead of costimulation, the barrier, egress, and tool execution, and returns `Denied` the instant it is set. **The model has no channel to it** — no tool named "resume," no field it can write, no path from a proposal to the flag — which is the structural posture of I-6/I-12 applied to the stop button. The requirement's stronger form, a fully separate out-of-process control plane, is a deployment concern; what the architecture guarantees is that within the harness the termination path does not traverse the model's reasoning or execution, which is exactly the failure the AISI incident (four days undetected) exposed.
+
+#### Trajectory reconstruction (OQGF-P-12.8)
+
+`execute_hop` appends a `TrajectoryEntry` for **every hop attempt, whatever its outcome** — `Executed`, `Denied { stage, reason }` at any gate (including a denial before a proposal exists, where the entry records no proposed action), or `Error` — so the ordered session trajectory is complete and reconstructable, not a set of isolated decision records. `trajectory()` returns the sequence. Each entry carries an `EvidenceProvenance` (below). This is the evidence on which every other AMD-011 requirement is audited; without it, containment and authorization-boundary crossings are invisible after the fact.
+
+#### Sub-agent, peer, and collective governance (OQGF-P-12.6) — placed, not exercised
+
+`SubAgentRecord` holds the child's `CapabilityEnvelope` and the AMD-001 `IntentProvenanceChain` attenuated from the parent, and `validate(parent)` refuses `CapabilityExceedsParent` when the child declares a capability the parent lacks — monotonic attenuation inherited from AMD-001 rather than re-implemented. The Rev 1.1 collective/peer-agent properties (`InterAgentCommunication`, `SharedCoordinationState`, `CrossRunCoordination`, `CollectiveCapabilityAmplification`) are members of `CapabilityProperty`. **BROKKR spawns no sub-agents and joins no peer swarm**, so these are a placed type surface with intrinsic validation and no runtime path; the hooks are ready if that changes. Recorded as PARTIAL in §14 and named in §13.
+
+#### Prompt-only containment rejection (OQGF-P-12.7)
+
+There is no implementation hook, because it is a design constraint the whole architecture already satisfies: every containment, authorization, network, termination, and enforcement control in BROKKR is deterministic Rust external to the model. The system prompt is an intent input to MÍMIR, never a boundary. This is the same principle as §2's bidirectional prime directive, stated in AMD-011's vocabulary.
+
 ## 7. The governor is itself governed
 
 Any action modifying BROKKR's own control surface — the genome (tools, CBOM, AIBOM, **endpoint registry**), an invariant set, gate configuration, classification policy, **a channel-strength policy**, a tolerance grant, or activation of a learned detector — is a `SelfModifying` privilege-class action. Costimulated like any other privileged action **and** requiring explicit DAP confirmation (OQGF-M-13, A.6.3). There is no privileged path BROKKR can grant itself, no invariant it can quietly relax, and no god-mode.
@@ -1634,7 +1730,11 @@ Named, not claimed eliminated.
 - **OQGF-R-6 is unmet at Enhanced.** Threshold key custody is not implemented, the framework's own tiering of it is contradictory, and this is recorded as a gap rather than read down to a tier where it disappears (§1.4, §6.11).
 - **The reasoner's competence.** BROKKR governs what the model may *do*, not how well it *reasons*. Quality of reasoning is a property of MÍMIR, improved by adopting better models — not something the spine can enforce.
 - **Attestation is not verified as attestation.** *(New in Rev 1.3.)* At Phase 4, Signal 1 proves key possession for a declared identity; it does not verify `Attestation.measurements` against expected platform state, and no attestation issuer exists. OQGF-M-1 is PARTIAL. Closing it requires an issuer, a committed attestation signed-content encoding, and a measurement-expectation source (§6.4).
-- **Two of OQGF-M-11's four conjuncts are not yet enforced.** *(New in Rev 1.3.)* Action-in-scope and action-respects-invariants are deferred pending the tool-to-capability vocabulary (REGIN, Phase 5) and an invariant-evaluator seam. Bounded by the **Deferred-Conjunct Deadline** (§6.4): both SHALL be enforced before the executor is wired at Phase 11.
+- **~~Two of OQGF-M-11's four conjuncts are not yet enforced.~~ Closed in Rev 1.18.** *(Was: new in Rev 1.3.)* Action-in-scope and action-respects-invariants are now enforced in SINDRI through the `GenomeResolver` seam (gate revision `884958f`); the Deferred-Conjunct Deadline is satisfied (§6.4). The **detail-level-invariant** residual below is the remaining, narrower part and stands.
+- **Environment attestation (OQGF-P-12.3) is not built.** *(New in Rev 1.18.)* BROKKR's Capability Envelope is declared, validated at construction (`validate()`), and signed in shape, and it carries an `attested_at` timestamp — but no mechanism verifies that the *deployed environment* matches the declaration (that a capability declared absent is in fact unreachable). This is precisely the Anthropic failure mode AMD-011 P-12.3 exists to catch, and BROKKR does not yet catch it. The envelope is a declaration, not an attestation. Named, not claimed built; closing it requires an environment-probe that mirrors the OQGF-M-3 declare-then-test pattern.
+- **The evidence sensor is the governed system.** *(New in Rev 1.18.)* Every SAGA record carries evidence-source provenance and every gap is explicit — the recording obligation of the Organ 5 patch is met in full. But the sensor is the orchestrator itself (`sensor_id: "orchestrator"`), which is inside the trusted computing base. The patch's general principle — *the governed system SHALL NOT be the authority over its own evidence* — is satisfied in its recording form (the path is attested, coverage declared, gaps explicit) and **not** in its strongest form (an independent observer). BROKKR states the sensor honestly rather than hiding it (F-23); an independent evidence sensor is future work. Same residual shape as AMD-007's upstream-provenance-truth: the record proves what was captured and by whom, not that the capturer was disinterested.
+- **Sub-agent, peer, and collective governance are a placed type surface.** *(New in Rev 1.18.)* `SubAgentRecord::validate` enforces capability-subset and attenuation, and the collective properties are inventoried in `CapabilityProperty` — but BROKKR spawns no sub-agents and joins no peer swarm, so no runtime path exercises P-12.6. If BROKKR ever delegates, the enforcement hook is ready; today it is untested against real spawning. Named so it is a scheduled capability rather than an assumed one.
+- **The egress manifest governs declared destinations, not compromised ones.** *(New in Rev 1.18.)* Default-deny prevents an *unauthorized* destination; it does not prevent an *authorized* destination from being compromised — the OpenAI–Hugging Face zero-day went through a permitted proxy. The manifest is one layer; network-security depth (the HNDL sentinel, incident response) complements it. Named, bounded, not claimed solved — AMD-011's own residual, inherited.
 - **A signature proves who decided, never whether they decided well.** *(New in Rev 1.12.)* `ClearEvidence` on a resolution decision is opaque prose. A DAP may sign a de-escalation whose stated justification is thin or wrong, and that signature verifies exactly as well as one over a rigorous justification — the cryptography binds the decision to a named person and says nothing about its quality. The same holds for a `RiskAcceptance`'s `justification` and a tolerance grant's scope. **This is not closable by cryptography**; it is why the DAP is a named natural person (OQGF-A-5), why the decision is recorded and reportable, and why periodic review (OQGF-P-9.5) exists. The control is accountability after the fact, not verification before it.
 - **The host-harm rate is a lower bound, biased toward looking safe.** *(New in Rev 1.11.)* Its numerator is *confirmed* host-harm incidents — a DAP saying a blocked action was legitimate. A false positive nobody reports does not appear, so the measured rate under-states real host harm, and always in the same direction. Correcting it would require confirming the legitimacy of every *allowed* action, which no one will do. **A rising confirmed rate is real evidence; a low one is weak evidence.** Mitigation is procedural — making confirmation cheap and routine — not architectural.
 - **Screening is inert until a Self Set exists, and a Self Set requires having run.** *(New in Rev 1.11.)* Central-tolerance screening (OQGF-P-3) tests a detector against BROKKR's own legitimate activity in its own environment. That baseline comes from SAGA records of real work, curated and DAP-signed — so it cannot exist before deployment. A borrowed public corpus screens the wrong population, and a synthetic one declares a guess about normal and passes it to every detector screened against it. **Early deployment therefore runs with screening effectively unavailable**, which is an ordering constraint to plan around rather than a defect to engineer away.
@@ -1688,8 +1788,17 @@ Named, not claimed eliminated.
 | **OQGF-M-5 (mutual auth)** | **`ModelEndpoint::client_cert` required at registration. One-sided TLS is unrepresentable (I-11)** |
 | **OQGF-M-6 (vendor trust score)** | **PARTIAL — `brokkr-genome::VendorTrustScore`; all five M-6 factors placed incl. `reconciliation_pass_rate` (Rev 1.4). That factor is a statistic over reconciliation OUTCOMES, so it is unmeasurable until actions are executed (Phase 11) against proposals (Phase 10) — **not** at Phase 8, correcting Rev 1.4 (§6.7, Rev 1.11). Stale after 90 days; gate-blocking. Distinct from R-2** |
 | OQGF-M-8 … M-14 (AMD-001) | `brokkr-intent` (SKULD). **Chain verified in SINDRI via `Skuld::verify_chain_public` against declared public roots of trust (§6.4.1)** |
-| **OQGF-M-11 (costimulation)** | **PARTIAL — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. Signals 1-2 enforced at Phase 4. Conjunct 3 (action-in-scope) becomes computable via `ToolEntry::required_capabilities` and conjunct 4 via `PolicyRegister` (§6.2, Rev 1.4); both SHALL be enforced before Phase 11 (Deferred-Conjunct Deadline, §6.4)** |
-| **OQGF-M-10 (invariant enforcement)** | **PARTIAL — accumulation and non-removal enforced in SKULD; action-evaluation lands via `PolicyRegister` for DECLARATIVE invariants (§6.2, Rev 1.4); detail-level invariants remain unevaluated (§13)** |
+| **OQGF-M-11 (costimulation)** | **SATISFIED — `brokkr-gate::CostimulationGate::evaluate`; the provided `authorize` is the sole minter. All four conjuncts enforced: Signals 1–2 (Phase 4) and conjuncts 3–4 via the `GenomeResolver` seam (gate revision `884958f`) — undeclared tool or missing capability → `OutOfScope`; forbidden-by-invariant or unresolvable invariant → `InvariantViolated`. Deferred-Conjunct Deadline satisfied (§6.4)** |
+| **OQGF-M-10 (invariant enforcement)** | **SATISFIED for declarative invariants — accumulation and non-removal in SKULD; action-evaluation in SINDRI conjunct 4 (`884958f`), which denies an invariant with no declared predicate. Detail-level invariants (a path rule inside `Action.detail`) remain unevaluated — a standing residual (§13), not the deferred-conjunct gap, which is closed** |
+| **OQGF-A-1 (decision records) — evidence provenance** | **`brokkr-audit::AuditRecord::provenance` (`EvidenceProvenance`), part of the signed content; every SAGA record carries sensor, capture path, coverage, and explicit gap; `append_with_provenance` / `AuditSink::record_with_provenance`; the orchestrator is the sensor and says so (F-23). The general Organ 5 principle — the governed system is not the authority over its own evidence — is met in recording form; an independent sensor is future work (§13). Organ 5 evidence-capture hardening patch (§6.9)** |
+| **OQGF-A-8 … A-12 (AMD-010)** | **n.a. — types placed in `brokkr-core::explanation` (Option B); `ExplanationValidity` has no Null→Valid path; OQGF-A-4 is n.a. (classical LLM), so these inherit the disposition (§1.4, §6.9)** |
+| **OQGF-P-12.1, P-12.2 (dual-axis, envelope)** | **`brokkr-core::capability::CapabilityEnvelope` + `CapabilityProperty`; `governing_tier = max(...)` enforced by `validate()` (TierMismatch/TierTooLow); BROKKR's envelope floors at Enhanced (§6.13)** |
+| **OQGF-P-12.3 (environment attestation)** | **PARTIAL — envelope declared, validated, signed-in-shape, `attested_at` carried; no deployed-environment attestation mechanism (§13)** |
+| **OQGF-P-12.4 (deterministic egress)** | **`brokkr-cli` `check_egress`; default-deny against the signed `EgressManifest`; Deterministic Gate under OQGF-P-2, sibling to OQGF-I-10 (§6.13)** |
+| **OQGF-P-12.5 (independent termination)** | **`brokkr-cli` `kill_flag: Arc<AtomicBool>` / `kill_handle()`, checked before every gate; the model has no channel to it (§6.13)** |
+| **OQGF-P-12.6 (sub-agent / peer / collective)** | **PARTIAL / type-surface — `SubAgentRecord::validate` (capability subset + AMD-001 attenuation) and the collective `CapabilityProperty` members placed; BROKKR spawns no sub-agents (§6.13, §13)** |
+| **OQGF-P-12.7 (prompt-only rejection)** | **Satisfied by construction — every containment/authorization/enforcement control is deterministic Rust external to the model; the prompt is an intent input, never a boundary (§6.13, §2)** |
+| **OQGF-P-12.8 (trajectory + evidence independence)** | **`brokkr-cli` `record_trajectory` — every hop attempt appended (`TrajectoryEntry` with `EvidenceProvenance`); `trajectory()` accessor; recording half met, independent-sensor half named (§6.9, §6.13, §13)** |
 | OQGF-M-12 (reconciliation) | `brokkr-sentinel` cross-hop reconciliation |
 | **OQGF-A-1 (decision records)** | **`brokkr-audit` — the proposal event carries model identity, AIBOM digest, input-or-derivative, output, explanation, timestamp, DAP. Scoped to AI/ML decisions; in BROKKR that is a MÍMIR proposal (Phase 10). Deterministic-gate verdicts carry the header and their own payload (§6.9)** |
 | **OQGF-A-2 (quantum computation records)** | **n.a. — declared §1.4** |
@@ -1715,11 +1824,19 @@ Named, not claimed eliminated.
 | OQGF-P-8.1 … 8.7 (resolution) | `brokkr-sentinel` (EIR) — declared paths, hysteresis, chronic scan |
 | OQGF-P-9 (risk acceptance) | `BarrierVerdict::AcceptedRisk`; register distinct from tolerance; standing inventory |
 
-**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 added the reasoner-crossing row; Rev 1.15 added the I-13 freshness row; Rev 1.16 amended the I-6/P-3/P-4 row for the evaluation loop; Rev 1.17 adds the AMD-003 row for KVASIR.
+**Bold rows are new or amended in Rev 1.2, Rev 1.3, and Rev 1.4.** Rev 1.2 disposed GAP-2026-07-14-001; Rev 1.3 amended the M-1, M-8…M-14, M-10, and M-11 rows per §6.4/§6.4.1; Rev 1.4 amended the G-1, G-4, G-8, M-6, M-10, and M-11 rows per §6.2; Rev 1.5 amended the G-8 row for the capability vocabulary; Rev 1.6 split the AMD-007 row, separating the deterministic barrier requirements (Phase 6) from the heuristic ones (Phase 8); Rev 1.7 added the AMD-009 row for the Personal-Data Tag; Rev 1.8 added the AMD-006 row for the finding-identity surface; Rev 1.9 replaced the single blanket Organ-A row with itemized rows for OQGF-A-1 … A-7 and the AMD-009 lifecycle requirements Organ 5 carries; Rev 1.10 amended the A-6 row for the corrected linkage digest; Rev 1.11 corrected the M-6 row's timing and added itemized rows for the sentinel requirements; Rev 1.12 added rows for the resolution signed content and the tolerance signature error; Rev 1.13 amended the P-8.2/P-8.5 row with the two refusal variants; Rev 1.14 added the reasoner-crossing row; Rev 1.15 added the I-13 freshness row; Rev 1.16 amended the I-6/P-3/P-4 row for the evaluation loop; Rev 1.17 adds the AMD-003 row for KVASIR; Rev 1.18 moves the OQGF-M-11 and OQGF-M-10 rows from PARTIAL to SATISFIED (the Deferred-Conjunct Deadline closed, gate revision `884958f`) and adds the OQGF-A-1 evidence-provenance row (Organ 5 patch), the OQGF-A-8…A-12 row (AMD-010, n.a.), and the OQGF-P-12.1…P-12.8 rows (AMD-011).
 
 ---
 
 ## 15. Change log
+
+**Rev 1.18 — 1 September 2026. Records three placed governance items and closes the Deferred-Conjunct Deadline. Every change adds, tightens, or records a fact; the one removed residual is removed because its requirement is now enforced.**
+
+- **AMD-010 (Explanation Validity, OQGF-A-8…A-12) placed and dispositioned `n.a.`** AMD-010 extends OQGF-A-4 (quantum-appropriate explanation artifacts) with a declared scope bound, the Null Explanation, trainability reconciliation, and the Canary Probe. BROKKR runs a classical LLM with no variational or kernel quantum model in its decision path; OQGF-A-4 is already `n.a.` (§1.4), so OQGF-A-8…A-12 inherit that disposition. The `brokkr-core::explanation` type surface is placed (Option B) so the architecture can name it and the surface is ready for a future quantum workload; no logic is built. **This disposition requires no further implementation work from the builder, which is stated per CLAUDE.md §4 — the `n.a.` is the DAP's, on the OQGF-A-4 basis, not the builder's recommendation.**
+- **AMD-011 v1.1 (Capability-Triggered Assurance, OQGF-P-12.1…P-12.8) placed and implemented (§6.13).** The dual-axis rule (`governing_tier = max(capability, data)`, enforced by `CapabilityEnvelope::validate`), deterministic default-deny egress (a Deterministic Gate under OQGF-P-2, sibling to OQGF-I-10), independent termination (a kill flag checked before every gate that the model cannot reach), and trajectory reconstruction with evidence provenance are built. BROKKR's declared envelope — `CodeExecution` + `NetworkAccess(localhost:8443)` + `ExternalEffect(filesystem)` — floors at Enhanced, matching BROKKR's governing tier. Environment attestation (P-12.3) and sub-agent/peer/collective governance (P-12.6) are placed as declarations and type surfaces, not built or exercised, and are recorded PARTIAL (§13, §14).
+- **The Organ 5 evidence-capture hardening patch placed and implemented (§6.9).** OQGF-A-1 is extended so every material audit record carries evidence-source provenance (sensor, capture path, capture timestamp, coverage scope, explicit gap), and the general Organ 5 principle is added: **the governed system SHALL NOT be the authority over its own evidence.** `AuditRecord::provenance` is part of the signed content — set once at capture, so signing it means a non-key-holder cannot alter how a record claims it was captured. BROKKR's sensor is the orchestrator, stated honestly in `sensor_id` (F-23); an independent sensor is future work (§13).
+- **The Deferred-Conjunct Deadline is closed (§6.4).** All four OQGF-M-11 conjuncts are now enforced in SINDRI: Signals 1–2 (Phase 4) and conjuncts 3–4 via the `GenomeResolver` seam (gate revision `884958f`). The §13 residual is closed and the OQGF-M-11 and OQGF-M-10 traceability rows move from PARTIAL to SATISFIED (M-10 for declarative invariants; the detail-level-invariant residual stands, and OQGF-M-1 is unaffected and remains PARTIAL).
+- **Corpus growth recorded.** The binding is now OQGF-1.0 + AMD-001…AMD-011 + the Organ 5 patch; the Physiology Layer runs OQGF-P-1…P-12. Per CLAUDE.md §5.3, every conformance result recorded before this revision is provisional with respect to the new requirements, and the next conformance check in each affected crate SHALL enumerate them.
 
 **Rev 1.17 — 18 August 2026. Places §6.12 (KVASIR). Every other subsystem has had a section since Rev 1.0; the one implementing AMD-003's four poisoning gates had a table row, one paragraph in §5, and nothing else.**
 
@@ -1953,4 +2070,4 @@ Also: invariants **I-11** and **I-12** added; `brokkr-bifrost` crate added betwe
 
 **Rev 1.0 — 13 July 2026** (commit `0ed1849`). Initial specification. Established the governing principle that the reasoning model is never in the trust path, seven subsystems, the governed action cycle, and the structural encoding of safety properties through `AuthorizedAction`. *Superseded by Rev 1.1: the Physiology Layer coverage was incomplete, no conformance level was declared, and the Genetic Layer omitted the CBOM and AIBOM.*
 
-— End of BROKKR technical architecture, Rev 1.17.
+— End of BROKKR technical architecture, Rev 1.18.
