@@ -1,5 +1,5 @@
 //! The real model backend (Phase 12): an [`OllamaBackend`] that talks to a self-hosted
-//! `llama3.2:3b` via ollama's `/api/generate`, reached **through BIFRÖST's mTLS transport** (I-6).
+//! `llama3.1:8b` via ollama's `/api/generate`, reached **through BIFRÖST's mTLS transport** (I-6).
 //!
 //! **The model call passes through BIFRÖST.** This backend formats an ollama HTTP request and hands
 //! the bytes to [`brokkr_bifrost::MtlsTransport::round_trip`]; it opens no socket of its own. That
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn extracts_response_field_from_a_full_http_response() {
         let raw = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 60\r\n\r\n\
-{\"model\":\"llama3.2:3b\",\"response\":\"TOOL: write_file\\nPATH: /tmp/x.txt\",\"done\":true}";
+{\"model\":\"llama3.1:8b\",\"response\":\"TOOL: write_file\\nPATH: /tmp/x.txt\",\"done\":true}";
         assert_eq!(
             json_string_field(raw, "response").as_deref(),
             Some("TOOL: write_file\nPATH: /tmp/x.txt")

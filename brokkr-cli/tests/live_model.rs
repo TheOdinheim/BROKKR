@@ -1,7 +1,7 @@
 //! Phase 12 — the full governed action cycle with a **real self-hosted model**.
 //!
 //! `#[ignore]` — **not hermetic**. Requires:
-//! - ollama serving `llama3.2:3b` on `localhost:11434`
+//! - ollama serving `llama3.1:8b` on `localhost:11434`
 //! - the nginx mTLS gateway on `localhost:8443` forwarding to ollama
 //! - the dev certs under `~/BROKKR/certs/`
 //!
@@ -286,7 +286,7 @@ fn full_cycle_with_a_real_model() {
 
     // --- real MÍMIR: ollama backend, reached THROUGH BIFRÖST's transport (I-6) ---
     let reg = InMemoryRegistry::new([endpoint.clone()]);
-    let backend = OllamaBackend::new(MtlsTransport::new(cfg.clone()), "llama3.2:3b", "localhost");
+    let backend = OllamaBackend::new(MtlsTransport::new(cfg.clone()), "llama3.1:8b", "localhost");
     let mimir = Mimir::new(
         endpoint.clone(),
         &reg,
