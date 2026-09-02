@@ -352,10 +352,18 @@ impl Orchestrator {
     /// Install the system's [`CapabilityEnvelope`] (AMD-011). `new` defaults to
     /// [`CapabilityEnvelope::permissive`] (no egress enforcement); a deployment (or a test)
     /// supplies its attested envelope here. The signed egress manifest, if present, is extracted
-    /// once for fast per-hop lookup (P-12.4). The caller is responsible for having validated the
-    /// envelope ([`CapabilityEnvelope::validate`]) — this does not re-verify the signature.
+    /// once for fast per-hop lookup (P-12.4). This does not re-verify the signature.
+    ///
+    /// F-32 (DAP-directed) — the envelope is **validated before it governs** (I-14): an invalid
+    /// envelope (`TierMismatch` or `TierTooLow`) is rejected here rather than allowed to govern a
+    /// run. The check is a **hard** `assert!` — fail-closed, the same pattern `permissive()` uses
+    /// (F-33), and `assert!` rather than `.expect()` because §6 denies `expect_used` in production.
     #[must_use]
     pub fn with_envelope(mut self, envelope: CapabilityEnvelope) -> Self {
+        assert!(
+            envelope.validate().is_ok(),
+            "capability envelope must be valid before it governs (I-14)"
+        );
         self.egress_rules = envelope.egress_manifest.as_ref().map(|m| m.rules.clone());
         self.envelope = envelope;
         self

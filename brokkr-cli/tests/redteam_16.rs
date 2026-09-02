@@ -14,8 +14,10 @@
 //! and `fix_egress_still_denies_unknown` (host normalization); F-33 became `fix_permissive_validates`
 //! (`permissive()` now hard-validates); F-34 became `fix_egress_all_three_match_allowed`,
 //! `fix_egress_port_mismatch_denied`, and `fix_egress_protocol_mismatch_denied` (the egress check now
-//! matches host, port, AND protocol — `Destination::Network` carries port/protocol). F-32/F-37/F-38
-//! remain as documented (accepted) — see the phase report.
+//! matches host, port, AND protocol — `Destination::Network` carries port/protocol); and F-32 became
+//! `fix_with_envelope_rejects_tier_too_low` + `fix_with_envelope_rejects_tier_mismatch` (`with_envelope`
+//! now hard-validates — an invalid envelope never governs, I-14). F-37/F-38 remain as documented
+//! (accepted) — see the phase report.
 //!
 //! Hermetic; real dual-family PQC signed once serially in `fx()`.
 
@@ -308,15 +310,15 @@ fn envelope_with_rule(rule: EgressRule) -> CapabilityEnvelope {
 }
 
 // ======================================================================================
-// F-32 — `with_envelope` does not validate: an invalid envelope governs a live orchestrator
+// F-32 (DAP-directed fix) — `with_envelope` validates before it governs (I-14)
 // ======================================================================================
 
-/// F-32 — an envelope with `ExternalEffect` but `capability_tier: Baseline` is invalid
-/// (`TierTooLow`), yet `with_envelope` installs it without complaint and the orchestrator runs.
-/// The type *can* catch it (`validate()` returns `Err`); the orchestrator boundary does not call
-/// `validate()`, so the drafted I-14 ("validated before it governs") is not enforced here.
+/// F-32 (DAP-directed) — an envelope with `ExternalEffect` but `capability_tier: Baseline` is
+/// invalid (`TierTooLow`); `with_envelope` now **rejects it with a hard `assert!`** (fail-closed,
+/// I-14) rather than installing it. Fails against the pre-fix code, which installed it and ran.
 #[test]
-fn f32_with_envelope_accepts_tier_too_low() {
+#[should_panic(expected = "capability envelope must be valid")]
+fn fix_with_envelope_rejects_tier_too_low() {
     let bad = CapabilityEnvelope {
         system_id: "bad".to_string(),
         properties: vec![CapabilityProperty::ExternalEffect {
@@ -329,22 +331,16 @@ fn f32_with_envelope_accepts_tier_too_low() {
         attested_at: Timestamp(1),
         signature: sig(),
     };
-    // The type catches it...
+    // The type catches it — and now so does the orchestrator boundary: this call panics.
     assert_eq!(bad.validate(), Err(EnvelopeError::TierTooLow));
-    // ...but the orchestrator installs it and runs anyway (the finding).
-    let orch = ok_orch().with_envelope(bad.clone());
-    assert_eq!(orch.envelope().capability_tier, ConformanceTier::Baseline);
-    let out = orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1000));
-    assert!(
-        matches!(out, HopResult::Executed { .. }),
-        "an invalid (never-validated) envelope still governs a running orchestrator: {out:?}"
-    );
+    let _ = ok_orch().with_envelope(bad);
 }
 
-/// F-32 — a `governing_tier` that is not `max(capability, data)` is `TierMismatch`, and is
-/// likewise installed without validation.
+/// F-32 (DAP-directed) — a `governing_tier` that is not `max(capability, data)` is `TierMismatch`,
+/// and `with_envelope` rejects it too. An invalid envelope never governs a run.
 #[test]
-fn f32_with_envelope_accepts_tier_mismatch() {
+#[should_panic(expected = "capability envelope must be valid")]
+fn fix_with_envelope_rejects_tier_mismatch() {
     let bad = CapabilityEnvelope {
         system_id: "bad".to_string(),
         properties: vec![],
@@ -356,9 +352,7 @@ fn f32_with_envelope_accepts_tier_mismatch() {
         signature: sig(),
     };
     assert_eq!(bad.validate(), Err(EnvelopeError::TierMismatch));
-    let orch = ok_orch().with_envelope(bad);
-    // The under-stated governing tier is accepted verbatim.
-    assert_eq!(orch.envelope().governing_tier, ConformanceTier::Baseline);
+    let _ = ok_orch().with_envelope(bad);
 }
 
 // ======================================================================================
