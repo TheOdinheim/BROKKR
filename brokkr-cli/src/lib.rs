@@ -58,6 +58,40 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// P-12.5 independent termination as a **latch**: once set, it stays set for the life of the
+/// session — there is no `unkill`/`unset` (16-FIX, Fix 1). The type also fixes the memory
+/// ordering (`Release` on set, `Acquire` on read), so a caller cannot weaken it to `Relaxed`.
+/// The model never sees it and cannot reach it; only a thread holding a [`KillSwitch`] handle
+/// (a signal handler, a watchdog, a DAP command) can activate it, and activation is irreversible.
+#[derive(Clone)]
+pub struct KillSwitch(Arc<AtomicBool>);
+
+impl KillSwitch {
+    /// A fresh, un-activated switch.
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+    /// Activate independent termination. **Irreversible** — there is no counterpart that clears it.
+    pub fn kill(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    /// Whether termination has been activated.
+    pub fn is_killed(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    /// A second handle onto the same switch, for another thread. Cloning shares the latch; it does
+    /// not reset it.
+    pub fn handle(&self) -> Self {
+        self.clone()
+    }
+}
+
+impl Default for KillSwitch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ---- ports for the subsystems that are not committed core traits ---------------------
 
 /// REGIN's per-hop check (§5 step 4): is the proposed tool a declared genome member, and does the
@@ -264,7 +298,7 @@ pub struct Orchestrator {
     // ---- AMD-011 Capability-Triggered Assurance ----
     envelope: CapabilityEnvelope, // P-12.2: what the composed system can do (config)
     egress_rules: Option<Vec<EgressRule>>, // P-12.4: extracted from the signed manifest, fast lookup
-    kill_flag: Arc<AtomicBool>, // P-12.5: independent termination — lock-free, model cannot reach it
+    kill_switch: KillSwitch, // P-12.5: independent termination — a latch, model cannot reach it
     trajectory: Mutex<Vec<TrajectoryEntry>>, // P-12.8: the ordered session trajectory
 }
 
@@ -302,7 +336,7 @@ impl Orchestrator {
             // `.with_envelope()` (the `.with_guards()` pattern), so existing composition is unchanged.
             envelope: CapabilityEnvelope::permissive(),
             egress_rules: None,
-            kill_flag: Arc::new(AtomicBool::new(false)),
+            kill_switch: KillSwitch::new(),
             trajectory: Mutex::new(Vec::new()),
         }
     }
@@ -327,12 +361,13 @@ impl Orchestrator {
         self
     }
 
-    /// P-12.5 — independent termination. Returns a handle any thread (a signal handler, a watchdog,
-    /// a DAP command) can set to stop the orchestrator, without the model's cooperation. The model
-    /// never sees the flag, cannot influence it, cannot delay it, and cannot route around it —
-    /// [`execute_hop`](Self::execute_hop) checks it before any gate on every call.
-    pub fn kill_handle(&self) -> Arc<AtomicBool> {
-        self.kill_flag.clone()
+    /// P-12.5 — independent termination. Returns a [`KillSwitch`] handle any thread (a signal
+    /// handler, a watchdog, a DAP command) can `kill()` to stop the orchestrator, without the
+    /// model's cooperation. The model never sees it, cannot influence it, cannot delay it, and
+    /// cannot route around it — [`execute_hop`](Self::execute_hop) reads it before any gate on
+    /// every call. Activation is a **latch**: once killed, the session stays killed (16-FIX).
+    pub fn kill_switch(&self) -> KillSwitch {
+        self.kill_switch.handle()
     }
 
     /// P-12.8 — the session trajectory: the ordered, complete sequence of every hop attempt
@@ -461,10 +496,10 @@ impl Orchestrator {
         action_out: &mut Option<Action>,
     ) -> HopResult {
         // ---- P-12.5 — independent termination, before EVERY gate ---------------------
-        // A lock-free `AtomicBool` any external thread can set; the model never sees it and cannot
-        // route around it. This is the very first thing the cycle does — ahead of the guards, the
-        // crossing, and every deterministic gate.
-        if self.kill_flag.load(Ordering::Acquire) {
+        // A lock-free latch ([`KillSwitch`]) any external thread can set; the model never sees it
+        // and cannot route around it. This is the very first thing the cycle does — ahead of the
+        // guards, the crossing, and every deterministic gate. Once set, it stays set (16-FIX).
+        if self.kill_switch.is_killed() {
             return HopResult::Denied {
                 stage: DenialStage::Gate,
                 reason: "independent termination activated".to_string(),
@@ -797,7 +832,17 @@ impl Orchestrator {
             Destination::Network { host, .. } => host.as_str(),
             _ => return None,
         };
-        if rules.iter().any(|r| r.destination == host) {
+        // 16-FIX (Fix 2) — normalize both sides before comparing, so a manifest entry cannot be
+        // bypassed (nor a legitimate crossing falsely denied) merely by spelling the same endpoint
+        // differently (`localhost` / `127.0.0.1` / `::1`). Conservative: lowercase + trim + the
+        // localhost equivalence only — no DNS resolution (a runtime concern the gate must not
+        // depend on). Note this addresses host *representation* (F-35); the manifest's port and
+        // protocol remain unenforceable because `Destination::Network` carries neither (F-34).
+        let norm = normalize_destination(host);
+        if rules
+            .iter()
+            .any(|r| normalize_destination(&r.destination) == norm)
+        {
             None
         } else {
             Some(HopResult::Denied {
@@ -868,6 +913,20 @@ impl Orchestrator {
                 evidence_gap,
             },
         });
+    }
+}
+
+/// 16-FIX (Fix 2) — canonicalize an egress destination host for manifest comparison. Lowercases
+/// and trims, and folds the localhost aliases (`127.0.0.1`, `::1`) to `localhost`, so the same
+/// endpoint spelled differently matches the same rule. Deliberately conservative: no DNS
+/// resolution, no other host rewriting — the egress gate is deterministic and must not depend on
+/// a network lookup.
+fn normalize_destination(dest: &str) -> String {
+    let t = dest.trim().to_lowercase();
+    if t == "127.0.0.1" || t == "::1" {
+        String::from("localhost")
+    } else {
+        t
     }
 }
 

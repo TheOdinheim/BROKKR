@@ -133,7 +133,7 @@ impl CapabilityEnvelope {
     /// no-op. The signature is a placeholder — this envelope is a local default, not
     /// an attested, DAP-signed one (which a real deployment supplies).
     pub fn permissive() -> Self {
-        Self {
+        let envelope = Self {
             system_id: String::from("permissive"),
             properties: Vec::new(),
             egress_manifest: None,
@@ -142,7 +142,16 @@ impl CapabilityEnvelope {
             governing_tier: ConformanceTier::Enhanced,
             attested_at: Timestamp(0),
             signature: placeholder_signature(),
-        }
+        };
+        // 16-FIX (Fix 3) — belt-and-suspenders: the library-provided default SHALL be a valid
+        // envelope. `debug_assert!` (not a hard error) because `permissive()` is a test/composition
+        // default and a hard error would panic setup; the assert catches a future regression that
+        // makes the tiers inconsistent, during any debug/test run.
+        debug_assert!(
+            envelope.validate().is_ok(),
+            "permissive envelope must be valid"
+        );
+        envelope
     }
 }
 

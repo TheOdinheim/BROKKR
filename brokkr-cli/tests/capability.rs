@@ -5,7 +5,6 @@
 //! Hermetic; real dual-family PQC signed once serially in `fx()`.
 
 use std::sync::OnceLock;
-use std::sync::atomic::Ordering;
 use std::thread;
 
 use brokkr_audit::AuditEvent;
@@ -325,9 +324,9 @@ fn no_manifest_skips_egress_check() {
 #[test]
 fn kill_flag_stops_execution() {
     let orch = build(Box::new(ClearAll), CapabilityEnvelope::permissive());
-    let kill = orch.kill_handle();
+    let kill = orch.kill_switch();
     thread::scope(|s| {
-        s.spawn(|| kill.store(true, Ordering::Release));
+        s.spawn(|| kill.kill());
     });
     match orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1000)) {
         HopResult::Denied { stage, reason } => {
@@ -353,7 +352,7 @@ fn kill_flag_not_set_executes_normally() {
 #[test]
 fn kill_flag_checked_before_all_gates() {
     let orch = build(Box::new(DenyCrossing), CapabilityEnvelope::permissive());
-    orch.kill_handle().store(true, Ordering::Release);
+    orch.kill_switch().kill();
     match orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1000)) {
         HopResult::Denied { stage, reason } => {
             assert_eq!(stage, DenialStage::Gate);

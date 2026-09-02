@@ -2,16 +2,20 @@
 //! Organ 5 evidence-capture patch introduced (commits `5d2a6f5`…`70ad4f5`): the Capability
 //! Envelope, the egress manifest, the kill flag, the trajectory, and evidence provenance.
 //!
-//! **Document, don't fix.** Every test here *asserts the behaviour that actually ships*, so the
-//! finding is the assertion itself: where a test asserts a fail-open default or an ignored
-//! manifest field, that is the finding, recorded in `reports/REDTEAM-16-2026-09-01-R1.md`
-//! (findings F-32 … F-38). Attack angles already covered by `tests/capability.rs` (manifested
-//! allow/deny, kill-before-all-gates, trajectory order) and `tests/evidence.rs` (per-event
-//! provenance capture paths) are not duplicated.
+//! **Document, don't fix** (Phase 16). Every test here *asserts the behaviour that actually
+//! ships*, so the finding is the assertion itself; findings F-32 … F-38 in
+//! `reports/REDTEAM-16-2026-09-01-R1.md`. Attack angles already covered by `tests/capability.rs`
+//! (manifested allow/deny, kill-before-all-gates, trajectory order) and `tests/evidence.rs`
+//! (per-event provenance capture paths) are not duplicated.
+//!
+//! **16-FIX update.** Two findings were hardened, so their tests were converted in place to the
+//! fixed behaviour (renamed, not deleted) and joined by `fix_*` regressions:
+//! `fix_kill_switch_is_a_latch` (F-36 → the `KillSwitch` latch), `fix_egress_ip_hostname_equivalence`
+//! + `fix_egress_still_denies_unknown` (F-35 → destination normalization), `fix_permissive_validates`
+//! (Fix 3). F-32/F-33/F-34/F-37/F-38 remain as documented (accepted) — see the phase report.
 //!
 //! Hermetic; real dual-family PQC signed once serially in `fx()`.
 
-use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -397,10 +401,11 @@ fn f34_egress_ignores_port_and_protocol() {
 // F-35 — host matching is exact-string: representation-sensitive, no wildcard
 // ======================================================================================
 
-/// F-35 — a manifest allowing `localhost` denies `127.0.0.1` (same endpoint, different spelling).
-/// Too strict on the host, while F-34 is too loose on the port.
+/// F-35 (16-FIX regression, Fix 2) — a manifest allowing `localhost` now admits `127.0.0.1`: the
+/// two normalize to the same endpoint. Fails against the pre-fix exact-string match (which denied
+/// it). The `"*"`-is-literal half of F-35 is unchanged (below).
 #[test]
-fn f35_egress_host_representation_sensitive() {
+fn fix_egress_ip_hostname_equivalence() {
     let orch = ok_orch().with_envelope(envelope_with_rule(EgressRule {
         destination: "localhost".to_string(),
         port: 8443,
@@ -408,9 +413,34 @@ fn f35_egress_host_representation_sensitive() {
     }));
     let out = orch.execute_hop(req(network_dest("127.0.0.1"), attest(P1)), Timestamp(1000));
     assert!(
-        matches!(out, HopResult::Denied { .. }),
-        "127.0.0.1 != localhost under exact-string match: {out:?}"
+        matches!(out, HopResult::Executed { .. }),
+        "127.0.0.1 normalizes to localhost and is admitted: {out:?}"
     );
+}
+
+/// F-35 (16-FIX regression, Fix 2) — normalization does not broaden: an unrelated host with no
+/// localhost equivalence is still denied.
+#[test]
+fn fix_egress_still_denies_unknown() {
+    let orch = ok_orch().with_envelope(envelope_with_rule(EgressRule {
+        destination: "localhost".to_string(),
+        port: 8443,
+        protocol: EgressProtocol::Https,
+    }));
+    let out = orch.execute_hop(
+        req(network_dest("192.168.1.1"), attest(P1)),
+        Timestamp(1000),
+    );
+    assert!(
+        matches!(out, HopResult::Denied { .. }),
+        "an unrelated host is not normalized to localhost: {out:?}"
+    );
+}
+
+/// 16-FIX (Fix 3) — the library-provided default envelope validates.
+#[test]
+fn fix_permissive_validates() {
+    assert!(CapabilityEnvelope::permissive().validate().is_ok());
 }
 
 /// F-35 — `"*"` is a literal destination, not a glob: it matches only the host `"*"`.
@@ -432,30 +462,33 @@ fn f35_egress_star_is_literal_not_wildcard() {
 }
 
 // ======================================================================================
-// F-36 — the kill flag is not a latch
+// F-36 — the kill flag is now a LATCH (16-FIX, Fix 1)
 // ======================================================================================
 
-/// F-36 — set then unset resumes operation. `AtomicBool` is freely settable; there is no
-/// once-killed-stays-killed latch. Any holder of the handle can re-enable the orchestrator.
+/// F-36 (16-FIX regression) — once killed, the session stays killed. The `KillSwitch` API has no
+/// `unkill`/`unset` (the resume path F-36 documented is gone at the type level), and a second
+/// handle onto the same latch sees the killed state — cloning shares, it does not reset. Fails
+/// against the pre-fix `Arc<AtomicBool>` (which had `store(false, ..)`).
 #[test]
-fn f36_kill_flag_is_not_a_latch() {
+fn fix_kill_switch_is_a_latch() {
     let orch = ok_orch();
-    let kill = orch.kill_handle();
-    kill.store(true, Ordering::Release);
-    // Denied while set...
+    let kill = orch.kill_switch();
+    kill.kill();
+    assert!(kill.is_killed());
+    // Denied while killed.
     assert!(matches!(
         orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1000)),
         HopResult::Denied { .. }
     ));
-    // ...reset resumes.
-    kill.store(false, Ordering::Release);
-    assert!(
-        matches!(
-            orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1001)),
-            HopResult::Executed { .. }
-        ),
-        "unsetting the kill flag resumes operation — it is not a latch"
-    );
+    // A second handle sees the same latched state; there is no API to clear it, and a repeated
+    // kill() is idempotent. The session stays killed.
+    let second = orch.kill_switch();
+    assert!(second.is_killed());
+    second.kill();
+    assert!(matches!(
+        orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1001)),
+        HopResult::Denied { .. }
+    ));
 }
 
 // ======================================================================================
@@ -476,11 +509,11 @@ fn f37_kill_flag_is_pre_hop_not_mid_hop() {
         }),
         Box::new(DiscardAudit),
     );
-    let kill = orch.kill_handle();
+    let kill = orch.kill_switch();
     thread::scope(|s| {
         let h = s.spawn(|| orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1000)));
         started_rx.recv().expect("tool started"); // past the pre-hop kill check, inside execute
-        kill.store(true, Ordering::Release); // set kill mid-hop
+        kill.kill(); // set kill mid-hop
         release_tx.send(()).expect("release"); // let the tool finish
         let out = h.join().expect("join");
         assert!(
