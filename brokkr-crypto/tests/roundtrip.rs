@@ -124,6 +124,39 @@ fn test_mlkem768_encapsulate_decapsulate_agree() {
     );
 }
 
+/// A-1 (DAP-directed) — after `destroy()`, every FFI-touching method returns an error rather than
+/// passing the post-destroy null pointer across the boundary. `encapsulate`, `ciphertext_size`, and
+/// `shared_secret_size` now guard `destroyed` symmetrically with `decapsulate`. Fails against the
+/// pre-fix code, where the three unguarded methods reached the FFI with a null key pointer.
+#[test]
+fn test_a1_mlkem768_methods_error_after_destroy() {
+    let mut kem = ffi::MlKem768::generate().unwrap();
+    // A well-formed ciphertext captured while the key is live, to attempt decapsulation after.
+    let (ct, _ss) = kem.encapsulate().unwrap();
+
+    kem.destroy();
+
+    assert!(
+        kem.ciphertext_size().is_err(),
+        "ciphertext_size must error after destroy(), not call FFI with a null key"
+    );
+    assert!(
+        kem.shared_secret_size().is_err(),
+        "shared_secret_size must error after destroy()"
+    );
+    assert!(
+        kem.encapsulate().is_err(),
+        "encapsulate must error after destroy()"
+    );
+    assert!(
+        kem.decapsulate(&ct).is_err(),
+        "decapsulate must error after destroy() (unchanged; the reference guard)"
+    );
+
+    // destroy() is idempotent — a second call is a no-op and does not double-free.
+    kem.destroy();
+}
+
 #[test]
 fn test_crypto_shred_roundtrip_then_irrecoverable() {
     let mut subject = SubjectKey::generate().unwrap();

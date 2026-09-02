@@ -608,23 +608,40 @@ impl MlKem768 {
     }
 
     pub fn ciphertext_size(&self) -> Result<usize, i32> {
+        // A-1 — guard against use after destroy(), symmetric with decapsulate: once destroyed,
+        // self.ptr is null, so refuse here rather than pass a null pointer across the FFI.
+        if self.destroyed {
+            return Err(-99);
+        }
         let mut n: Word32 = 0;
-        // SAFETY: self.ptr live; n is a valid out-param.
+        // SAFETY: guarded above, so self.ptr is a live key (not the post-destroy null); n is a
+        // valid out-param.
         check(unsafe { wc_MlKemKey_CipherTextSize(self.ptr, &mut n) }).map(|()| n as usize)
     }
 
     pub fn shared_secret_size(&self) -> Result<usize, i32> {
+        // A-1 — guard against use after destroy() (see ciphertext_size).
+        if self.destroyed {
+            return Err(-99);
+        }
         let mut n: Word32 = 0;
-        // SAFETY: self.ptr live; n is a valid out-param.
+        // SAFETY: guarded above, so self.ptr is a live key (not the post-destroy null); n is a
+        // valid out-param.
         check(unsafe { wc_MlKemKey_SharedSecretSize(self.ptr, &mut n) }).map(|()| n as usize)
     }
 
     /// Encapsulate to this key's public part. Returns (ciphertext, shared_secret).
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), i32> {
+        // A-1 — guard against use after destroy(), symmetric with decapsulate. (The size queries
+        // below also guard, but the explicit check keeps the invariant local and the SAFETY note
+        // honest.)
+        if self.destroyed {
+            return Err(-99);
+        }
         let mut ct = vec![0u8; self.ciphertext_size()?];
         let mut ss = vec![0u8; self.shared_secret_size()?];
-        // SAFETY: self.ptr live; ct/ss buffers are sized by the library's own size
-        // queries above; rng live.
+        // SAFETY: guarded above, so self.ptr is a live key (not the post-destroy null); ct/ss
+        // buffers are sized by the library's own size queries above; rng live.
         let ret = unsafe {
             wc_MlKemKey_Encapsulate(self.ptr, ct.as_mut_ptr(), ss.as_mut_ptr(), self.rng.ptr)
         };
