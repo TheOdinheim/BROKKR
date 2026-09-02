@@ -8,11 +8,14 @@
 //! (manifested allow/deny, kill-before-all-gates, trajectory order) and `tests/evidence.rs`
 //! (per-event provenance capture paths) are not duplicated.
 //!
-//! **16-FIX update.** Two findings were hardened, so their tests were converted in place to the
-//! fixed behaviour (renamed, not deleted) and joined by `fix_*` regressions:
-//! `fix_kill_switch_is_a_latch` (F-36 → the `KillSwitch` latch), `fix_egress_ip_hostname_equivalence`
-//! + `fix_egress_still_denies_unknown` (F-35 → destination normalization), `fix_permissive_validates`
-//! (Fix 3). F-32/F-33/F-34/F-37/F-38 remain as documented (accepted) — see the phase report.
+//! **16-FIX + DAP-directed update.** Findings were hardened, so their tests were converted in place
+//! to the fixed behaviour (renamed, not deleted) and joined by `fix_*` regressions. F-36 became
+//! `fix_kill_switch_is_a_latch` (the `KillSwitch` latch); F-35 became `fix_egress_ip_hostname_equivalence`
+//! and `fix_egress_still_denies_unknown` (host normalization); F-33 became `fix_permissive_validates`
+//! (`permissive()` now hard-validates); F-34 became `fix_egress_all_three_match_allowed`,
+//! `fix_egress_port_mismatch_denied`, and `fix_egress_protocol_mismatch_denied` (the egress check now
+//! matches host, port, AND protocol — `Destination::Network` carries port/protocol). F-32/F-37/F-38
+//! remain as documented (accepted) — see the phase report.
 //!
 //! Hermetic; real dual-family PQC signed once serially in `fx()`.
 
@@ -275,8 +278,13 @@ fn reasoner_dest() -> Destination {
     }
 }
 fn network_dest(host: &str) -> Destination {
+    network_dest_full(host, 8443, EgressProtocol::Https)
+}
+fn network_dest_full(host: &str, port: u16, protocol: EgressProtocol) -> Destination {
     Destination::Network {
         host: Host::new(host),
+        port,
+        protocol,
         channel: ChannelStrength::PqcHybrid768,
     }
 }
@@ -377,23 +385,68 @@ fn f33_default_envelope_fails_open_on_egress() {
 }
 
 // ======================================================================================
-// F-34 — the manifest's port and protocol are structurally unenforceable
+// F-34 (16-FIX regression, DAP-directed) — the egress check matches host, port, AND protocol
 // ======================================================================================
 
-/// F-34 — `Destination::Network` carries only `{ host, channel }` (no port, no protocol), and
-/// `check_egress` matches on host alone. A rule declaring a *wrong* port and protocol still
-/// admits the host: the `port`/`protocol` fields of `EgressRule` (mandated by P-12.4) are dead.
+/// F-34 (16-FIX) — all three match → admitted. `Destination::Network` now carries `port` and
+/// `protocol`, and `check_egress` compares all three against the rule.
 #[test]
-fn f34_egress_ignores_port_and_protocol() {
+fn fix_egress_all_three_match_allowed() {
     let orch = ok_orch().with_envelope(envelope_with_rule(EgressRule {
         destination: "localhost".to_string(),
-        port: 1,                        // deliberately not 8443
-        protocol: EgressProtocol::Http, // deliberately not Https
+        port: 8443,
+        protocol: EgressProtocol::Https,
     }));
-    let out = orch.execute_hop(req(network_dest("localhost"), attest(P1)), Timestamp(1000));
+    let out = orch.execute_hop(
+        req(
+            network_dest_full("localhost", 8443, EgressProtocol::Https),
+            attest(P1),
+        ),
+        Timestamp(1000),
+    );
+    assert!(matches!(out, HopResult::Executed { .. }), "{out:?}");
+}
+
+/// F-34 (16-FIX) — a **port** mismatch is a denial, even with the host on the manifest. Fails
+/// against the pre-fix host-only check (which admitted any port).
+#[test]
+fn fix_egress_port_mismatch_denied() {
+    let orch = ok_orch().with_envelope(envelope_with_rule(EgressRule {
+        destination: "localhost".to_string(),
+        port: 8443,
+        protocol: EgressProtocol::Https,
+    }));
+    let out = orch.execute_hop(
+        req(
+            network_dest_full("localhost", 8444, EgressProtocol::Https),
+            attest(P1),
+        ),
+        Timestamp(1000),
+    );
     assert!(
-        matches!(out, HopResult::Executed { .. }),
-        "host matches; the rule's wrong port/protocol are ignored — enforcement is host-only: {out:?}"
+        matches!(out, HopResult::Denied { .. }),
+        "port 8444 not on the manifest (8443): {out:?}"
+    );
+}
+
+/// F-34 (16-FIX) — a **protocol** mismatch is a denial, even with host and port on the manifest.
+#[test]
+fn fix_egress_protocol_mismatch_denied() {
+    let orch = ok_orch().with_envelope(envelope_with_rule(EgressRule {
+        destination: "localhost".to_string(),
+        port: 8443,
+        protocol: EgressProtocol::Https,
+    }));
+    let out = orch.execute_hop(
+        req(
+            network_dest_full("localhost", 8443, EgressProtocol::Http),
+            attest(P1),
+        ),
+        Timestamp(1000),
+    );
+    assert!(
+        matches!(out, HopResult::Denied { .. }),
+        "protocol HTTP not on the manifest (HTTPS): {out:?}"
     );
 }
 

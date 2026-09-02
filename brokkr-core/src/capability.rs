@@ -143,11 +143,15 @@ impl CapabilityEnvelope {
             attested_at: Timestamp(0),
             signature: placeholder_signature(),
         };
-        // 16-FIX (Fix 3) — belt-and-suspenders: the library-provided default SHALL be a valid
-        // envelope. `debug_assert!` (not a hard error) because `permissive()` is a test/composition
-        // default and a hard error would panic setup; the assert catches a future regression that
-        // makes the tiers inconsistent, during any debug/test run.
-        debug_assert!(
+        // F-33 (DAP-directed, closes the fail-open default) — the library-provided default SHALL be
+        // validated before it governs (I-14): a **hard** check, not `debug_assert`. If the internal
+        // construction is correct (it is: governing == max(Enhanced, Baseline) and no flooring
+        // property), this passes and nothing changes; a future edit that makes the tiers inconsistent
+        // panics here rather than silently producing an invalid envelope. The panic is **fail-closed**
+        // (no invalid envelope is ever returned), which is why it is compatible with §6's no-fail-open
+        // intent. `assert!` rather than `.expect()`/`.unwrap()` because §6 denies `expect_used`/
+        // `unwrap_used` in production; `assert!` is release-active and gives the same hard panic.
+        assert!(
             envelope.validate().is_ok(),
             "permissive envelope must be valid"
         );

@@ -828,21 +828,28 @@ impl Orchestrator {
     /// present and correct so such a tool is gated the moment it exists.
     fn check_egress(&self, dest: &Destination) -> Option<HopResult> {
         let rules = self.egress_rules.as_ref()?;
-        let host = match dest {
-            Destination::Network { host, .. } => host.as_str(),
+        let (host, port, protocol) = match dest {
+            Destination::Network {
+                host,
+                port,
+                protocol,
+                ..
+            } => (host.as_str(), *port, protocol),
             _ => return None,
         };
-        // 16-FIX (Fix 2) — normalize both sides before comparing, so a manifest entry cannot be
-        // bypassed (nor a legitimate crossing falsely denied) merely by spelling the same endpoint
-        // differently (`localhost` / `127.0.0.1` / `::1`). Conservative: lowercase + trim + the
-        // localhost equivalence only — no DNS resolution (a runtime concern the gate must not
-        // depend on). Note this addresses host *representation* (F-35); the manifest's port and
-        // protocol remain unenforceable because `Destination::Network` carries neither (F-34).
+        // Fix 2 (F-35) — normalize the host on both sides, so the same endpoint spelled differently
+        // (`localhost` / `127.0.0.1` / `::1`) cannot bypass the manifest nor be falsely denied.
+        // Conservative: lowercase + trim + the localhost equivalence only — no DNS resolution (a
+        // runtime concern the deterministic gate must not depend on).
+        // F-34 (DAP-directed) — a rule matches only when host (normalized), `port`, AND `protocol`
+        // all match; a mismatch on any of the three is a denial.
         let norm = normalize_destination(host);
-        if rules
-            .iter()
-            .any(|r| normalize_destination(&r.destination) == norm)
-        {
+        let allowed = rules.iter().any(|r| {
+            normalize_destination(&r.destination) == norm
+                && r.port == port
+                && &r.protocol == protocol
+        });
+        if allowed {
             None
         } else {
             Some(HopResult::Denied {

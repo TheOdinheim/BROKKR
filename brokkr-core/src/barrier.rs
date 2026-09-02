@@ -1,6 +1,7 @@
 //! HÚÐ — the Barrier (AMD-007), and the [`BarrierVerdict`] whose `Deny` has no
 //! path to `Allow` (I-2).
 
+use crate::capability::EgressProtocol;
 use crate::classification::{ChannelStrength, Classification, NamedGroup};
 use crate::crypto::DualSignature;
 use crate::ids::{
@@ -143,6 +144,13 @@ pub enum Destination {
     LocalPath(ResourcePath),
     Network {
         host: Host,
+        /// F-34 (DAP-directed) — the egress check matches host, `port`, AND `protocol` against the
+        /// signed `EgressManifest`; a mismatch on any of the three is a denial (OQGF-P-12.4).
+        port: u16,
+        protocol: EgressProtocol,
+        /// The channel actually negotiated — load-bearing for the channel-strength-collapse
+        /// condition (HÚÐ egress condition 8). Retained: F-34 adds `port`/`protocol` alongside it,
+        /// it does not replace it.
         channel: ChannelStrength,
     },
     Reasoner {

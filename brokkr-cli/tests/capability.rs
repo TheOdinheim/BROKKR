@@ -267,8 +267,12 @@ fn reasoner_dest() -> Destination {
     }
 }
 fn network_dest(host: &str) -> Destination {
+    // Default port/protocol match `brokkr_envelope`'s rule (localhost:8443 HTTPS) so a host-only
+    // allow case still passes; F-34 mismatch cases build a `Destination::Network` explicitly.
     Destination::Network {
         host: Host::new(host),
+        port: 8443,
+        protocol: EgressProtocol::Https,
         channel: ChannelStrength::PqcHybrid768,
     }
 }

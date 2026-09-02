@@ -27,7 +27,7 @@ use brokkr_core::barrier::{
     BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
 };
-use brokkr_core::capability::EvidenceProvenance;
+use brokkr_core::capability::{EgressProtocol, EvidenceProvenance};
 use brokkr_core::classification::{ChannelStrength, Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
 use brokkr_core::gate::{Action, AnergyReason};
@@ -138,6 +138,22 @@ fn channel_strength_tag(c: ChannelStrength) -> u8 {
         ChannelStrength::Classical => 1,
         ChannelStrength::PqcHybrid768 => 2,
         ChannelStrength::PqcHybrid1024 => 3,
+    }
+}
+
+/// Encode an [`EgressProtocol`] into the canonical `Destination::Network` bytes (F-34). Known
+/// variants are injective; `EgressProtocol` is `#[non_exhaustive]`, so the catch-all (tag 0) is
+/// forced by the compiler for a future variant. Network destinations are not recorded today; when
+/// they are, a new variant SHALL be given its own tag here.
+fn write_egress_protocol(c: &mut Canon, p: &EgressProtocol) {
+    match p {
+        EgressProtocol::Https => c.u8(1),
+        EgressProtocol::Http => c.u8(2),
+        EgressProtocol::Other(s) => {
+            c.u8(3);
+            c.bytes(s.as_bytes());
+        }
+        _ => c.u8(0),
     }
 }
 
@@ -275,9 +291,16 @@ fn write_destination(c: &mut Canon, d: &Destination) {
             c.u8(1);
             c.bytes(path.as_str().as_bytes());
         }
-        Destination::Network { host, channel } => {
+        Destination::Network {
+            host,
+            port,
+            protocol,
+            channel,
+        } => {
             c.u8(2);
             c.bytes(host.as_str().as_bytes());
+            c.u64(u64::from(*port));
+            write_egress_protocol(c, protocol);
             c.u8(channel_strength_tag(*channel));
         }
         Destination::Reasoner {

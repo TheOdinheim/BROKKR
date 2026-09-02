@@ -148,6 +148,12 @@ pub struct ProposalRecord {
 /// type or a small struct over committed value types (above). Variants whose emitting
 /// subsystem arrives later (HEIMDALL Phase 8, KVASIR Phase 9, MÍMIR Phase 10) are **placed**
 /// here; the subsystems are not built this phase.
+// `BarrierCrossing` is the largest variant (it carries a full `BoundaryFlow`), and the F-34
+// `Destination::Network` port/protocol fields pushed the size delta marginally past clippy's
+// `large_enum_variant` threshold. This is a stack-layout perf hint, not a correctness or safety
+// concern; boxing the variant would ripple through the audit-chain construction and canonical
+// encoding for no governance benefit. Deferred as a possible future optimization.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditEvent {
     /// A HÚÐ crossing decision (OQGF-I-13). Phase 6 decides; Phase 7 records.

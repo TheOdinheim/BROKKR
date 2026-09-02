@@ -10,6 +10,7 @@ use brokkr_core::barrier::{
     Barrier, BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
 };
+use brokkr_core::capability::EgressProtocol;
 use brokkr_core::classification::{ChannelStrength, Classification};
 use brokkr_core::crypto::DualSignature;
 use brokkr_core::ids::{
@@ -385,6 +386,8 @@ fn test_condition_8_channel_strength_collapse() {
     // A Secret datum over a Classical channel (which permits only Public).
     let dest = Destination::Network {
         host: Host::new("h"),
+        port: 443,
+        protocol: EgressProtocol::Https,
         channel: ChannelStrength::Classical,
     };
     let bcr = signed_bcr(
