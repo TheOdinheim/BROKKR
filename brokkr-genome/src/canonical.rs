@@ -22,12 +22,14 @@
 //! Hand-written: no serialization crate. serde/bincode/postcard are not guaranteed
 //! canonical across versions or configuration, and canonicality is the whole point.
 
+use brokkr_core::capability::ConformanceTier;
 use brokkr_core::classification::{Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, KemAlg, Signature, SignatureAlg};
 use brokkr_core::genome::{
-    Aibom, AlgorithmId, Cbom, EndpointRegistry, Genome, InvariantEntry, ModelEndpoint,
-    PolicyRegister, PrivilegeClass, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome,
-    VendorTrustScore,
+    Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl,
+    EndpointRegistry, ExtractionProtection, FipsValidation, Genome, HardwareBoundary,
+    InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass, ProcedureRef,
+    RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, VendorTrustScore,
 };
 use brokkr_core::ids::{Dap, ModelIdentity, Score};
 use brokkr_core::intent::Capability;
@@ -73,6 +75,54 @@ impl Canon {
 }
 
 // ---- exhaustive enum tags (a new variant must break the build, not collide) ----------
+
+fn conformance_tier_tag(t: ConformanceTier) -> u8 {
+    match t {
+        ConformanceTier::Baseline => 1,
+        ConformanceTier::Enhanced => 2,
+        ConformanceTier::HighAssurance => 3,
+    }
+}
+
+fn key_custody_tag(c: &KeyCustody) -> u8 {
+    match c {
+        KeyCustody::SoftwareInProcess { .. } => 1,
+        KeyCustody::HardwareBacked { .. } => 2,
+        KeyCustody::Threshold { .. } => 3,
+    }
+}
+
+fn extraction_protection_tag(p: &ExtractionProtection) -> u8 {
+    match p {
+        ExtractionProtection::ProcessIsolationOnly => 1,
+        ExtractionProtection::EncryptedAtRest => 2,
+        ExtractionProtection::Other { .. } => 3,
+    }
+}
+
+fn boundary_interface_tag(i: &BoundaryInterface) -> u8 {
+    match i {
+        BoundaryInterface::Pkcs11 => 1,
+        BoundaryInterface::CloudKms => 2,
+        BoundaryInterface::Tpm => 3,
+        BoundaryInterface::SecureEnclave => 4,
+        BoundaryInterface::Other { .. } => 5,
+    }
+}
+
+fn fips_validation_tag(f: &FipsValidation) -> u8 {
+    match f {
+        FipsValidation::NotValidated => 1,
+        FipsValidation::Level { .. } => 2,
+    }
+}
+
+fn dual_control_tag(d: &DualControl) -> u8 {
+    match d {
+        DualControl::SingleOperator => 1,
+        DualControl::TwoParty { .. } => 2,
+    }
+}
 
 fn hashalg_tag(h: HashAlg) -> u8 {
     match h {
@@ -224,6 +274,97 @@ fn write_tools_signed(c: &mut Canon, t: &ToolGenome) {
     }
 }
 
+fn write_procedure_ref(c: &mut Canon, p: &ProcedureRef) {
+    c.bytes(p.document.as_bytes());
+    write_digest(c, &p.digest);
+}
+
+fn write_extraction_protection(c: &mut Canon, p: &ExtractionProtection) {
+    c.u8(extraction_protection_tag(p));
+    match p {
+        ExtractionProtection::ProcessIsolationOnly | ExtractionProtection::EncryptedAtRest => {}
+        ExtractionProtection::Other { description } => c.bytes(description.as_bytes()),
+    }
+}
+
+fn write_fips_validation(c: &mut Canon, f: &FipsValidation) {
+    c.u8(fips_validation_tag(f));
+    match f {
+        FipsValidation::NotValidated => {}
+        FipsValidation::Level { level, certificate } => {
+            c.u8(*level);
+            c.bytes(certificate.as_bytes());
+        }
+    }
+}
+
+fn write_boundary_interface(c: &mut Canon, i: &BoundaryInterface) {
+    c.u8(boundary_interface_tag(i));
+    match i {
+        BoundaryInterface::Pkcs11
+        | BoundaryInterface::CloudKms
+        | BoundaryInterface::Tpm
+        | BoundaryInterface::SecureEnclave => {}
+        BoundaryInterface::Other { description } => c.bytes(description.as_bytes()),
+    }
+}
+
+fn write_hardware_boundary(c: &mut Canon, b: &HardwareBoundary) {
+    c.bytes(b.module.as_bytes());
+    write_boundary_interface(c, &b.interface);
+    write_fips_validation(c, &b.fips);
+}
+
+fn write_dual_control(c: &mut Canon, d: &DualControl) {
+    c.u8(dual_control_tag(d));
+    match d {
+        DualControl::SingleOperator => {}
+        DualControl::TwoParty { procedure } => write_procedure_ref(c, procedure),
+    }
+}
+
+fn write_custodian_separation(c: &mut Canon, s: &CustodianSeparation) {
+    c.u8(s.independent_parties);
+    write_procedure_ref(c, &s.separation_of_duty);
+}
+
+/// The custody declaration (OQGF-R-6, AMD-018). Inside the CBOM's signed content, so a
+/// change to the declared custody model changes the CBOM digest, the genome signature, and
+/// requires re-promotion.
+fn write_key_custody(c: &mut Canon, k: &KeyCustody) {
+    c.u8(key_custody_tag(k));
+    match k {
+        KeyCustody::SoftwareInProcess { protection } => write_extraction_protection(c, protection),
+        KeyCustody::HardwareBacked {
+            boundary,
+            dual_control,
+        } => {
+            write_hardware_boundary(c, boundary);
+            write_dual_control(c, dual_control);
+        }
+        KeyCustody::Threshold {
+            boundary,
+            dual_control,
+            quorum,
+            custodians,
+            ceremony,
+            recovery,
+            rotation,
+            last_rehearsal,
+        } => {
+            write_hardware_boundary(c, boundary);
+            write_dual_control(c, dual_control);
+            c.u8(quorum.k);
+            c.u8(quorum.n);
+            write_custodian_separation(c, custodians);
+            write_procedure_ref(c, ceremony);
+            write_procedure_ref(c, recovery);
+            write_procedure_ref(c, rotation);
+            c.u64(last_rehearsal.0);
+        }
+    }
+}
+
 fn write_cbom_signed(c: &mut Canon, b: &Cbom) {
     c.bytes(DOMAIN_CBOM);
     c.bytes(b.cyclonedx.as_bytes());
@@ -231,6 +372,7 @@ fn write_cbom_signed(c: &mut Canon, b: &Cbom) {
     for a in &b.algorithms {
         write_algorithm_id(c, a);
     }
+    write_key_custody(c, &b.custody);
 }
 
 fn write_aibom_signed(c: &mut Canon, b: &Aibom) {
@@ -365,6 +507,10 @@ pub fn genome_signed_content(g: &Genome) -> Vec<u8> {
     let mut c = Canon::new();
     c.bytes(DOMAIN_GENOME);
     c.bytes(g.version.as_str().as_bytes());
+    // The declared conformance tier (ARCH Rev 1.22) is inside the genome's signed content:
+    // changing it changes the genome signature and requires re-promotion, so a downgrade
+    // that would relax predicate 7's custody obligation is a signed, attributable act.
+    c.u8(conformance_tier_tag(g.tier));
     write_digest(&mut c, &g.corpus_digest);
     write_dap(&mut c, &g.owner);
     write_register_full(

@@ -8,6 +8,7 @@
 //! I-11: [`ModelEndpoint::client_cert`] is a required field, not an `Option`.
 //! One-sided TLS to a reasoner is unrepresentable (OQGF-M-5).
 
+use crate::capability::ConformanceTier;
 use crate::classification::{Classification, NamedGroup};
 use crate::crypto::{Digest, DualSignature, HashAlg, KemAlg, SignatureAlg};
 use crate::ids::{
@@ -73,6 +74,197 @@ pub enum AlgorithmId {
     Kem(KemAlg),
 }
 
+/// How BROKKR's long-lived signing keys are held (OQGF-R-6, AMD-018; ARCH Rev 1.21/1.22).
+///
+/// Carried on [`Cbom`] as a **required** field and inside the CBOM's signed content, so a
+/// custody declaration is deliberate, attributable, and gate-visible. Variants are ordered
+/// by the AMD-018 tier each can satisfy: R-6.1, R-6.2, R-6.3.
+///
+/// **What this proves and what it does not.** It proves the claim was made deliberately
+/// (there is no default and no `Unspecified` variant), is signed into the genome, and
+/// cannot change without re-promotion. It does **not** prove the claim is true: a genome
+/// declaring [`KeyCustody::HardwareBacked`] over keys held in process memory passes every
+/// predicate and violates R-6.2 entirely. AMD-018 §AMD.2.1 routes that case to assessment,
+/// not to the gate — "a declared custody model that overstates the separation actually
+/// achieved is a conformance failure, not a documentation defect."
+// `Threshold` is much larger than `SoftwareInProcess` — it embeds the R-6.2 elements plus
+// three procedure references, a quorum, and the custodian declaration. Boxing it would add
+// indirection to a type that lives in a signed register and is read once per promotion, and
+// the embedding is the point: it is what makes threshold-without-hardware unrepresentable
+// (AMD-018 defines R-6.3 as "in addition to R-6.2"). A stack-layout hint does not outrank a
+// structural guarantee. Same disposition as `brokkr-audit`'s `AuditEvent`.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyCustody {
+    /// R-6.1 territory. Private key material exists in extractable form in the process
+    /// address space. Selecting this variant is the deliberate, signed act R-6.1 requires
+    /// of a software-held key; it does **not** satisfy R-6.2 and fails promotion-gate
+    /// predicate 7 at Enhanced or above. This is BROKKR's honest posture today.
+    SoftwareInProcess {
+        /// R-6.1: "the protection mechanism SHALL be declared."
+        protection: ExtractionProtection,
+    },
+
+    /// R-6.2 candidate. The private key material cannot be extracted from the declared
+    /// boundary — that non-extractability **is** the meaning of choosing this variant,
+    /// which is why there is no `non_extractable: bool` for an author to set beside a
+    /// claim they are already making.
+    HardwareBacked {
+        boundary: HardwareBoundary,
+        /// Separate from `boundary` because AMD-018 §AMD.5 is explicit that "a FIPS
+        /// validation is not by itself evidence of dual control — R-6.2 requires both."
+        dual_control: DualControl,
+    },
+
+    /// R-6.3 candidate. R-6.2 **plus** k-of-n threshold custody. The R-6.2 elements are
+    /// embedded rather than adjacent, because AMD-018 defines R-6.3 as "in addition to
+    /// R-6.2" — so threshold custody without a hardware boundary and dual control is not
+    /// a state this type can express.
+    Threshold {
+        boundary: HardwareBoundary,
+        dual_control: DualControl,
+        /// AMD-018: quorum of at least 3-of-5.
+        quorum: Quorum,
+        /// "Shares SHALL be held by distinct custodians with documented separation of duty."
+        custodians: CustodianSeparation,
+        ceremony: ProcedureRef,
+        recovery: ProcedureRef,
+        rotation: ProcedureRef,
+        /// "SHALL rehearse recovery at least annually with the rehearsal recorded."
+        /// Staleness is arithmetic against `now`, like the OQGF-M-6 trust score.
+        last_rehearsal: Timestamp,
+    },
+}
+
+/// R-6.1's declared protection mechanism for a software-held key.
+///
+/// **Every variant here produces the same tier verdicts** — R-6.1 satisfied on the
+/// declaration clause, R-6.2 and R-6.3 failed — because none of them is a hardware
+/// boundary. This enum participates in **no predicate**; its whole job is R-6.1's "the
+/// protection mechanism SHALL be declared." It is therefore sized for an honest
+/// declaration and no larger (ARCH Rev 1.22).
+///
+/// Rev 1.21 specified an `EncryptedAtRest { kek: KeyRef }` variant against a `KeyRef` type
+/// that does not exist (GAP-2026-09-07-001). Rev 1.22 removed the payload rather than
+/// inventing the type: the KEK reference changes no tier verdict, so it is descriptive
+/// detail that does not earn a place in the committed vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtractionProtection {
+    /// Nothing beyond OS process isolation. The weakest honest declaration, and BROKKR's
+    /// actual posture today.
+    ProcessIsolationOnly,
+    /// Key material encrypted at rest under a separate key; still extractable from process
+    /// memory while in use. Named rather than folded into `Other` so the common case is
+    /// machine-comparable and typo-proof — the reasoning that made `PolicyRegister::
+    /// capabilities` a closed vocabulary (Rev 1.5).
+    EncryptedAtRest,
+    /// Anything else, described. Covers memory-locking, swap exclusion,
+    /// sealed-blob-then-loaded schemes, and mechanisms not common enough to earn a variant.
+    Other { description: String },
+}
+
+/// The declared hardware boundary for R-6.2 / R-6.3 custody.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HardwareBoundary {
+    /// What the module is, in the operator's own words.
+    pub module: String,
+    pub interface: BoundaryInterface,
+    /// AMD-018 §AMD.5: "FIPS 140-3 Level 2 or above satisfies R-6.2's hardware boundary
+    /// where the module's key-storage service is used; the level SHALL be declared in the
+    /// CBOM."
+    pub fips: FipsValidation,
+}
+
+/// How the hardware boundary is reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundaryInterface {
+    Pkcs11,
+    CloudKms,
+    Tpm,
+    SecureEnclave,
+    Other { description: String },
+}
+
+/// The declared FIPS validation of the boundary module.
+///
+/// **A FIPS validation is not by itself evidence of dual control** (AMD-018 §AMD.5); the
+/// two are separate declarations and predicate 7 requires both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FipsValidation {
+    NotValidated,
+    Level { level: u8, certificate: String },
+}
+
+/// Whether key issuance and rotation require a second party (R-6.2).
+///
+/// **`SingleOperator` exists deliberately.** An operator with hardware but no second-party
+/// procedure must be able to declare that **honestly** and fail predicate 7 on the
+/// dual-control element, rather than choosing between a false `TwoParty` claim and a false
+/// [`KeyCustody::SoftwareInProcess`] one. A type that makes the honest declaration
+/// inexpressible manufactures lies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DualControl {
+    SingleOperator,
+    TwoParty { procedure: ProcedureRef },
+}
+
+/// k-of-n threshold parameters (R-6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Quorum {
+    pub k: u8,
+    pub n: u8,
+}
+
+/// Why a [`Quorum`] is malformed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuorumError {
+    /// `k < 3` — below AMD-018's floor.
+    QuorumTooSmall,
+    /// `n < 5` — below AMD-018's floor.
+    TooFewShares,
+    /// `k > n` — a quorum larger than the share count can never be met.
+    QuorumExceedsShares,
+}
+
+impl Quorum {
+    /// AMD-018's floor: at least 3-of-5, and a quorum no larger than the share count.
+    pub fn validate(&self) -> Result<(), QuorumError> {
+        if self.k > self.n {
+            return Err(QuorumError::QuorumExceedsShares);
+        }
+        if self.k < 3 {
+            return Err(QuorumError::QuorumTooSmall);
+        }
+        if self.n < 5 {
+            return Err(QuorumError::TooFewShares);
+        }
+        Ok(())
+    }
+}
+
+/// Declared custodial separation (R-6.3).
+///
+/// AMD-018: "a share-holding arrangement in which fewer than k independent parties can
+/// reconstruct the secret SHALL NOT satisfy this requirement." `independent_parties` is
+/// the operator's declared count of genuinely separated holders — the number an assessor
+/// tests by inquiry, and the number predicate 7 checks against `quorum.k`. It is checked
+/// against `k` rather than assumed from `n`, which is why a declared 3-of-5 held by one
+/// party **fails on its own stated numbers**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustodianSeparation {
+    pub independent_parties: u8,
+    pub separation_of_duty: ProcedureRef,
+}
+
+/// A named document **and** its digest, so the declaration commits to a specific version.
+/// Changing the procedure changes the digest, changes the CBOM signature, and requires
+/// re-promotion — the discipline the AIBOM applies to prompt and corpus digests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcedureRef {
+    pub document: String,
+    pub digest: Digest,
+}
+
 /// The Cryptographic Bill of Materials (OQGF-G-1). Carries both the CycloneDX interchange
 /// document and the typed inventory a deterministic gate evaluates (Rev 1.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +275,12 @@ pub struct Cbom {
     /// (OQGF-G-5; Rev 1.4). SHALL agree with `cyclonedx`; the FFI honesty rule (§10)
     /// applies to both.
     pub algorithms: Vec<AlgorithmId>,
+    /// How the long-lived signing keys are held (OQGF-R-6, AMD-018; Rev 1.21/1.22).
+    ///
+    /// **Required, never `Option`:** a CBOM that does not state a custody model is
+    /// unrepresentable, so *omission* is not a way to avoid the declaration. That is the
+    /// whole of what the type provides — it makes the declaration explicit, not true.
+    pub custody: KeyCustody,
     pub signature: DualSignature,
 }
 
@@ -244,15 +442,15 @@ pub struct PolicyRegister {
 /// Deterministic) is Phase 5; the *type* that forbids an incomplete genome is here.
 ///
 /// The genome signature is not optional (I-10) — this does not compile (`None` as the
-/// 10th argument, the signature):
+/// 11th argument, the signature; Rev 1.22 inserted `tier` as the 8th):
 ///
 /// ```compile_fail,E0308
 /// use brokkr_core::genome::Genome;
 /// fn any<T>() -> T { unimplemented!() }
 /// let _ = Genome::new(
-///     any(), any(), any(), any(), any(), any(), any(), any(), any(), None,
+///     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), None,
 /// );
-/// // E0308: mismatched types — expected `DualSignature`, found `Option<_>` (10th arg)
+/// // E0308: mismatched types — expected `DualSignature`, found `Option<_>` (11th arg)
 /// ```
 ///
 /// Rev 1.4's new `roots` register is required too (the I-10 extension to the new
@@ -262,9 +460,22 @@ pub struct PolicyRegister {
 /// use brokkr_core::genome::Genome;
 /// fn any<T>() -> T { unimplemented!() }
 /// let _ = Genome::new(
-///     any(), any(), any(), any(), any(), None, any(), any(), any(), any(),
+///     any(), any(), any(), any(), any(), None, any(), any(), any(), any(), any(),
 /// );
 /// // E0308: mismatched types — expected `RootsOfTrust`, found `Option<_>` (6th arg)
+/// ```
+///
+/// Rev 1.22's `tier` is required on the same footing — a `None` for it does not compile
+/// (`None` as the 8th argument), so a genome that declares no conformance level is
+/// unrepresentable and predicate 7 always has a tier to check against:
+///
+/// ```compile_fail,E0308
+/// use brokkr_core::genome::Genome;
+/// fn any<T>() -> T { unimplemented!() }
+/// let _ = Genome::new(
+///     any(), any(), any(), any(), any(), any(), any(), None, any(), any(), any(),
+/// );
+/// // E0308: mismatched types — expected `ConformanceTier`, found `Option<_>` (8th arg)
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Genome {
@@ -275,6 +486,19 @@ pub struct Genome {
     pub endpoints: EndpointRegistry,
     pub roots: RootsOfTrust,
     pub policy: PolicyRegister,
+    /// The conformance level this genome is built to (ARCH Rev 1.22).
+    ///
+    /// **Inside the genome's signed content**, so changing the declared tier changes the
+    /// genome signature and requires re-promotion — a downgrade that would relax what
+    /// promotion-gate predicate 7 demands of key custody is a visible, signed,
+    /// DAP-attributed act rather than a configuration edit.
+    ///
+    /// It is a genome field rather than a `promote` parameter deliberately: a
+    /// caller-supplied tier would let **the party being checked choose the threshold it is
+    /// checked against**, the defect I-12 forecloses for `ClearedContext` and I-1 for
+    /// `AuthorizedAction`. The thing being governed does not supply the terms of its own
+    /// governance.
+    pub tier: ConformanceTier,
     pub corpus_digest: Digest,
     pub owner: Dap,
     pub signature: DualSignature,
@@ -290,6 +514,7 @@ impl Genome {
         endpoints: EndpointRegistry,
         roots: RootsOfTrust,
         policy: PolicyRegister,
+        tier: ConformanceTier,
         corpus_digest: Digest,
         owner: Dap,
         signature: DualSignature,
@@ -302,6 +527,7 @@ impl Genome {
             endpoints,
             roots,
             policy,
+            tier,
             corpus_digest,
             owner,
             signature,

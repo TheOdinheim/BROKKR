@@ -3,12 +3,14 @@
 //! predicate, each asserting the specific finding; plus the load-bearing domain-separation
 //! test and the Rev 1.5 narrowing case.
 
+use brokkr_core::capability::ConformanceTier;
 use brokkr_core::classification::{Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
 use brokkr_core::genome::{
-    Aibom, AlgorithmId, Cbom, EndpointRegistry, Genome, InvariantEntry, ModelEndpoint,
-    PolicyRegister, PrivilegeClass, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome,
-    ToolSchema, VendorTrustScore,
+    Aibom, AlgorithmId, BoundaryInterface, Cbom, DualControl, EndpointRegistry,
+    ExtractionProtection, FipsValidation, Genome, HardwareBoundary, InvariantEntry, KeyCustody,
+    ModelEndpoint, PolicyRegister, PrivilegeClass, RootOfTrustEntry, RootsOfTrust, ToolEntry,
+    ToolGenome, ToolSchema, VendorTrustScore,
 };
 use brokkr_core::ids::{
     ClientCertRef, Dap, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp,
@@ -63,6 +65,12 @@ struct Parts {
     policy_capabilities: Vec<Capability>,
     policy_invariants: Vec<InvariantEntry>,
     policy_disallowed: Vec<AlgorithmId>,
+    /// Rev 1.22: the declared key custody (OQGF-R-6) and the tier predicate 7 checks it
+    /// against. The default pair is CONFORMANT — `Baseline` + software custody with a
+    /// declared protection mechanism satisfies R-6.1 — so predicates 1-6 can be exercised
+    /// without predicate 7 confounding them.
+    custody: KeyCustody,
+    tier: ConformanceTier,
 }
 
 fn endpoint(id: &str, reviewed: u64) -> ModelEndpoint {
@@ -120,6 +128,13 @@ impl Parts {
                 forbids_privilege: vec![],
             }],
             policy_disallowed: vec![AlgorithmId::Signature(SignatureAlg::EcdsaP256)],
+            // Software custody with a declared mechanism — BROKKR's honest posture — at
+            // the tier where it is conformant (R-6.1). A fixture that must promote gets a
+            // fixture-appropriate tier; the predicate is not weakened to let it pass.
+            custody: KeyCustody::SoftwareInProcess {
+                protection: ExtractionProtection::ProcessIsolationOnly,
+            },
+            tier: ConformanceTier::Baseline,
         }
     }
 
@@ -138,6 +153,7 @@ impl Parts {
         let mut cbom = Cbom {
             cyclonedx: "<cbom/>".into(),
             algorithms: self.cbom_algorithms,
+            custody: self.custody,
             signature: dummy_sig(),
         };
         cbom.signature = kp
@@ -186,6 +202,7 @@ impl Parts {
             endpoints,
             roots,
             policy,
+            tier: self.tier,
             corpus_digest: Digest {
                 alg: HashAlg::Sha384,
                 bytes: vec![0u8; 48],
@@ -450,4 +467,64 @@ fn test_wrong_dap_key_blocks_all_signatures() {
     assert!(findings.contains(&Finding::RegisterSignatureInvalid {
         register: Register::Tools
     }));
+}
+
+// ---------------------------------------------------------------------------------------
+// Rev 1.22 — the custody declaration and the declared tier are inside signed content.
+// ---------------------------------------------------------------------------------------
+
+/// Changing the declared key custody changes the CBOM's signed content, so it changes the
+/// CBOM digest and invalidates the CBOM signature. A custody posture cannot drift quietly:
+/// downgrading it is a visible, signed, gate-crossing act (ARCH Rev 1.21 §6.2).
+#[test]
+fn test_r6_custody_is_inside_cbom_signed_content() {
+    let software = Cbom {
+        cyclonedx: "<cbom/>".into(),
+        algorithms: vec![],
+        custody: KeyCustody::SoftwareInProcess {
+            protection: ExtractionProtection::ProcessIsolationOnly,
+        },
+        signature: dummy_sig(),
+    };
+    let mut hardware = software.clone();
+    hardware.custody = KeyCustody::HardwareBacked {
+        boundary: HardwareBoundary {
+            module: "test-hsm".into(),
+            interface: BoundaryInterface::Pkcs11,
+            fips: FipsValidation::NotValidated,
+        },
+        dual_control: DualControl::SingleOperator,
+    };
+    assert_ne!(
+        canonical::cbom_signed_content(&software),
+        canonical::cbom_signed_content(&hardware),
+        "a change of declared custody MUST change the CBOM signed content"
+    );
+
+    // And the two software variants differ too — the declaration is encoded, not elided.
+    let mut encrypted = software.clone();
+    encrypted.custody = KeyCustody::SoftwareInProcess {
+        protection: ExtractionProtection::EncryptedAtRest,
+    };
+    assert_ne!(
+        canonical::cbom_signed_content(&software),
+        canonical::cbom_signed_content(&encrypted),
+        "a change of declared protection mechanism MUST change the CBOM signed content"
+    );
+}
+
+/// Changing the declared conformance tier changes the genome's signed content, so a
+/// downgrade that would relax what predicate 7 demands of custody requires re-signing and
+/// re-promotion (ARCH Rev 1.22 §6.2).
+#[test]
+fn test_r6_tier_is_inside_genome_signed_content() {
+    let mut kp = DualKeyPair::generate().unwrap();
+    let baseline = Parts::default_valid().sign(&mut kp);
+    let mut enhanced = baseline.clone();
+    enhanced.tier = ConformanceTier::Enhanced;
+    assert_ne!(
+        canonical::genome_signed_content(&baseline),
+        canonical::genome_signed_content(&enhanced),
+        "a change of declared tier MUST change the genome signed content"
+    );
 }
