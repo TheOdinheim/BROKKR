@@ -27,7 +27,10 @@ use brokkr_core::barrier::{
     BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
 };
-use brokkr_core::capability::{EgressProtocol, EvidenceProvenance};
+use brokkr_core::capability::{
+    AttestationOutcome, CapabilityProbe, CapabilityProperty, EgressProtocol,
+    EnvironmentAttestation, EvidenceProvenance, ProbeOutcome,
+};
 use brokkr_core::classification::{ChannelStrength, Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
 use brokkr_core::gate::{Action, AnergyReason};
@@ -556,6 +559,76 @@ fn write_erasure(c: &mut Canon, t: &ErasureTombstone) {
     write_dap(c, &t.dap);
 }
 
+/// A `CapabilityProperty`, via the exhaustive discriminant and payload the defining
+/// crate supplies (`CapabilityProperty::canonical_tag` / `canonical_payload`). The
+/// enum is `#[non_exhaustive]`, so an encoder-side `match` would need a wildcard —
+/// which would let a future variant encode under a borrowed tag instead of breaking
+/// the build. The exhaustive match therefore lives in `brokkr-core`.
+fn write_capability_property(c: &mut Canon, p: &CapabilityProperty) {
+    c.u8(p.canonical_tag());
+    let payload = p.canonical_payload();
+    c.u64(payload.len() as u64);
+    for part in payload {
+        c.bytes(part.as_bytes());
+    }
+}
+
+fn write_probe_outcome(c: &mut Canon, o: &ProbeOutcome) {
+    match o {
+        ProbeOutcome::Refused { detail } => {
+            c.u8(1);
+            c.bytes(detail.as_bytes());
+        }
+        ProbeOutcome::Reachable { detail } => {
+            c.u8(2);
+            c.bytes(detail.as_bytes());
+        }
+        ProbeOutcome::NotProbeable { reason } => {
+            c.u8(3);
+            c.bytes(reason.as_bytes());
+        }
+        ProbeOutcome::ProbeError { detail } => {
+            c.u8(4);
+            c.bytes(detail.as_bytes());
+        }
+    }
+}
+
+fn write_capability_probe(c: &mut Canon, p: &CapabilityProbe) {
+    write_capability_property(c, &p.capability);
+    c.u8(u8::from(p.declared));
+    c.bytes(p.attempted.as_bytes());
+    write_probe_outcome(c, &p.outcome);
+}
+
+/// OQGF-P-12.3 (ARCH Rev 1.23). Inside the record's signed content like every other
+/// event, so an attestation cannot be altered without breaking the chain.
+fn write_environment_attestation(c: &mut Canon, a: &EnvironmentAttestation) {
+    c.bytes(a.system_id.as_bytes());
+    c.u64(a.probes.len() as u64);
+    for p in &a.probes {
+        write_capability_probe(c, p);
+    }
+    match &a.outcome {
+        AttestationOutcome::Attested => c.u8(1),
+        AttestationOutcome::Discrepant { reachable } => {
+            c.u8(2);
+            c.u64(reachable.len() as u64);
+            for r in reachable {
+                write_capability_property(c, r);
+            }
+        }
+        AttestationOutcome::Incomplete { unprobed } => {
+            c.u8(3);
+            c.u64(unprobed.len() as u64);
+            for u in unprobed {
+                write_capability_property(c, u);
+            }
+        }
+    }
+    c.u64(a.probed_at.0);
+}
+
 /// The whole of the typed event, with an exhaustive variant discriminant (no catch-all).
 fn write_event(c: &mut Canon, e: &AuditEvent) {
     match e {
@@ -607,6 +680,10 @@ fn write_event(c: &mut Canon, e: &AuditEvent) {
         AuditEvent::Erasure(t) => {
             c.u8(11);
             write_erasure(c, t);
+        }
+        AuditEvent::EnvironmentAttestation(a) => {
+            c.u8(12);
+            write_environment_attestation(c, a);
         }
     }
 }

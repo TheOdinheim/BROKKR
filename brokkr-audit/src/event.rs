@@ -17,7 +17,7 @@ use brokkr_core::adapt::{DetectorProvenance, RefinedDetector};
 use brokkr_core::barrier::BarrierVerdict;
 use brokkr_core::barrier::BoundaryFlow;
 use brokkr_core::barrier::PersonalDataTag;
-use brokkr_core::capability::EvidenceProvenance;
+use brokkr_core::capability::{EnvironmentAttestation, EvidenceProvenance};
 use brokkr_core::classification::Classification;
 use brokkr_core::crypto::{Digest, DualSignature};
 use brokkr_core::gate::{Action, AnergyReason};
@@ -183,6 +183,13 @@ pub enum AuditEvent {
     Correction { corrects: u64, detail: String },
     /// A crypto-shred erasure tombstone (OQGF-P-11.5).
     Erasure(ErasureTombstone),
+    /// An OQGF-P-12.3 environment attestation — the deployed environment probed against
+    /// the declared Capability Envelope (ARCH Rev 1.23 §6.13).
+    ///
+    /// A distinct variant rather than a [`Signal`]: a signal is a posture *message*, this
+    /// is an *observation* of the environment, and filing the second as the first would
+    /// make the record claim something other than what happened.
+    EnvironmentAttestation(EnvironmentAttestation),
 }
 
 /// One append-only entry: a chain header plus a typed event, plus the accumulating
