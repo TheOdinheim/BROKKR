@@ -48,4 +48,4 @@ pub mod gate;
 pub mod verdict;
 
 pub use gate::promote;
-pub use verdict::{Finding, PromotionVerdict, Register};
+pub use verdict::{CustodyShortfall, Finding, PromotionVerdict, Register};

@@ -7,10 +7,10 @@ use brokkr_core::capability::ConformanceTier;
 use brokkr_core::classification::{Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
 use brokkr_core::genome::{
-    Aibom, AlgorithmId, BoundaryInterface, Cbom, DualControl, EndpointRegistry,
-    ExtractionProtection, FipsValidation, Genome, HardwareBoundary, InvariantEntry, KeyCustody,
-    ModelEndpoint, PolicyRegister, PrivilegeClass, RootOfTrustEntry, RootsOfTrust, ToolEntry,
-    ToolGenome, ToolSchema, VendorTrustScore,
+    Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl,
+    EndpointRegistry, ExtractionProtection, FipsValidation, Genome, HardwareBoundary,
+    InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass, ProcedureRef,
+    Quorum, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, ToolSchema, VendorTrustScore,
 };
 use brokkr_core::ids::{
     ClientCertRef, Dap, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp,
@@ -20,7 +20,7 @@ use brokkr_core::intent::{Capability, Invariant};
 use brokkr_core::tolerance::ResponseClass;
 use brokkr_crypto::{DualKeyPair, DualPublicKey};
 use brokkr_genome::canonical;
-use brokkr_genome::{Finding, PromotionVerdict, Register, promote};
+use brokkr_genome::{CustodyShortfall, Finding, PromotionVerdict, Register, promote};
 
 const NINETY_DAYS_MS: u64 = 7_776_000_000;
 const NOW: u64 = 20_000_000_000;
@@ -526,5 +526,262 @@ fn test_r6_tier_is_inside_genome_signed_content() {
         canonical::genome_signed_content(&baseline),
         canonical::genome_signed_content(&enhanced),
         "a change of declared tier MUST change the genome signed content"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Predicate 7 (Rev 1.21/1.22) — declared key custody against the declared conformance tier.
+// ---------------------------------------------------------------------------------------
+
+fn proc_ref(name: &str) -> ProcedureRef {
+    ProcedureRef {
+        document: name.into(),
+        digest: Digest {
+            alg: HashAlg::Sha384,
+            bytes: vec![7u8; 48],
+        },
+    }
+}
+
+fn boundary() -> HardwareBoundary {
+    HardwareBoundary {
+        module: "test-hsm".into(),
+        interface: BoundaryInterface::Pkcs11,
+        fips: FipsValidation::Level {
+            level: 3,
+            certificate: "CMVP-0000".into(),
+        },
+    }
+}
+
+fn software_custody() -> KeyCustody {
+    KeyCustody::SoftwareInProcess {
+        protection: ExtractionProtection::ProcessIsolationOnly,
+    }
+}
+
+/// A conformant R-6.3 declaration: 3-of-5, three independent parties, rehearsed recently.
+fn threshold_custody(k: u8, n: u8, independent_parties: u8, last_rehearsal: u64) -> KeyCustody {
+    KeyCustody::Threshold {
+        boundary: boundary(),
+        dual_control: DualControl::TwoParty {
+            procedure: proc_ref("dual-control"),
+        },
+        quorum: Quorum { k, n },
+        custodians: CustodianSeparation {
+            independent_parties,
+            separation_of_duty: proc_ref("separation"),
+        },
+        ceremony: proc_ref("ceremony"),
+        recovery: proc_ref("recovery"),
+        rotation: proc_ref("rotation"),
+        last_rehearsal: Timestamp(last_rehearsal),
+    }
+}
+
+/// Evaluate a genome at `now` and return only the predicate-7 shortfall, if any. Other
+/// findings (e.g. a trust score that went stale because `now` was advanced) are filtered
+/// out deliberately — this helper isolates predicate 7.
+fn custody_shortfall_at(
+    custody: KeyCustody,
+    tier: ConformanceTier,
+    now: u64,
+) -> Option<CustodyShortfall> {
+    let mut kp = DualKeyPair::generate().unwrap();
+    let mut parts = Parts::default_valid();
+    parts.custody = custody;
+    parts.tier = tier;
+    let genome = parts.sign(&mut kp);
+    let findings = match promote(&genome, &public_of(&kp), Timestamp(now)) {
+        PromotionVerdict::Promoted => Vec::new(),
+        PromotionVerdict::Blocked { findings } => findings,
+    };
+    findings.into_iter().find_map(|f| match f {
+        Finding::KeyCustodyBelowTier { element, .. } => Some(element),
+        _ => None,
+    })
+}
+
+fn custody_shortfall_of(custody: KeyCustody, tier: ConformanceTier) -> Option<CustodyShortfall> {
+    custody_shortfall_at(custody, tier, NOW)
+}
+
+// ---- R-6.1 (Baseline) ----
+
+#[test]
+fn test_r6_1_baseline_accepts_software_custody() {
+    assert!(
+        custody_shortfall_of(software_custody(), ConformanceTier::Baseline).is_none(),
+        "R-6.1 permits software-held keys when the CBOM declares them as such"
+    );
+}
+
+#[test]
+fn test_r6_1_baseline_accepts_hardware_custody() {
+    let custody = KeyCustody::HardwareBacked {
+        boundary: boundary(),
+        dual_control: DualControl::SingleOperator,
+    };
+    assert!(
+        custody_shortfall_of(custody, ConformanceTier::Baseline).is_none(),
+        "a stronger declaration than the tier requires is not a failure"
+    );
+}
+
+// ---- R-6.2 (Enhanced) ----
+
+/// **BROKKR's own genome fails predicate 7 today** — it declares Enhanced (BROKKR-ARCH
+/// §1.4) and its long-lived keys are software-in-process (§6.11), so the honest
+/// declaration is refused promotion. This is the expected and correct consequence recorded
+/// in §6.2; the predicate is not weakened to let it pass.
+#[test]
+fn test_r6_2_enhanced_refuses_software_custody() {
+    assert_eq!(
+        custody_shortfall_of(software_custody(), ConformanceTier::Enhanced),
+        Some(CustodyShortfall::NoHardwareBoundary),
+        "Enhanced requires a hardware boundary; software custody must be refused"
+    );
+}
+
+/// AMD-018 §AMD.5 — "a FIPS validation is not by itself evidence of dual control."
+/// `SingleOperator` exists so this can be declared honestly, and it must then fail.
+#[test]
+fn test_r6_2_enhanced_refuses_hardware_without_dual_control() {
+    let custody = KeyCustody::HardwareBacked {
+        boundary: boundary(),
+        dual_control: DualControl::SingleOperator,
+    };
+    assert_eq!(
+        custody_shortfall_of(custody, ConformanceTier::Enhanced),
+        Some(CustodyShortfall::NoDualControl),
+        "a hardware boundary without two-party issuance does not satisfy R-6.2"
+    );
+}
+
+#[test]
+fn test_r6_2_enhanced_accepts_hardware_with_dual_control() {
+    let custody = KeyCustody::HardwareBacked {
+        boundary: boundary(),
+        dual_control: DualControl::TwoParty {
+            procedure: proc_ref("dual-control"),
+        },
+    };
+    assert!(
+        custody_shortfall_of(custody, ConformanceTier::Enhanced).is_none(),
+        "hardware boundary + two-party issuance satisfies R-6.2"
+    );
+}
+
+// ---- R-6.3 (High-Assurance) ----
+
+#[test]
+fn test_r6_3_high_assurance_refuses_hardware_without_threshold() {
+    let custody = KeyCustody::HardwareBacked {
+        boundary: boundary(),
+        dual_control: DualControl::TwoParty {
+            procedure: proc_ref("dual-control"),
+        },
+    };
+    assert_eq!(
+        custody_shortfall_of(custody, ConformanceTier::HighAssurance),
+        Some(CustodyShortfall::NoThresholdCustody),
+        "R-6.3 requires k-of-n custody in addition to R-6.2"
+    );
+}
+
+/// **The one shortfall caught on substance rather than form.** AMD-018 §AMD.3: the original
+/// OQGF-R-6 could be satisfied by a Shamir implementation with every share in one hand;
+/// R-6.3 cannot. A declared 3-of-5 with one independent party is well-formed and
+/// self-evidently non-conformant — it fails on its own stated numbers.
+#[test]
+fn test_r6_3_declared_3_of_5_with_one_independent_party_fails_on_its_own_numbers() {
+    assert_eq!(
+        custody_shortfall_of(
+            threshold_custody(3, 5, 1, NOW - 1000),
+            ConformanceTier::HighAssurance
+        ),
+        Some(CustodyShortfall::InsufficientCustodialSeparation),
+        "3-of-5 whose shares one party holds does not satisfy R-6.3"
+    );
+}
+
+#[test]
+fn test_r6_3_quorum_below_floor_fails() {
+    assert_eq!(
+        custody_shortfall_of(
+            threshold_custody(2, 5, 5, NOW - 1000),
+            ConformanceTier::HighAssurance
+        ),
+        Some(CustodyShortfall::QuorumBelowFloor),
+        "k < 3 is below AMD-018's floor"
+    );
+    assert_eq!(
+        custody_shortfall_of(
+            threshold_custody(3, 4, 4, NOW - 1000),
+            ConformanceTier::HighAssurance
+        ),
+        Some(CustodyShortfall::QuorumBelowFloor),
+        "n < 5 is below AMD-018's floor"
+    );
+}
+
+#[test]
+fn test_r6_3_stale_or_future_rehearsal_fails() {
+    // NOW is ~231 days from the epoch, so no rehearsal can be a year stale at that clock.
+    // Advance `now` instead of retreating the rehearsal below zero.
+    let two_years_on = NOW + 2 * 31_536_000_000u64;
+    assert_eq!(
+        custody_shortfall_at(
+            threshold_custody(3, 5, 3, NOW),
+            ConformanceTier::HighAssurance,
+            two_years_on
+        ),
+        Some(CustodyShortfall::RehearsalStale),
+        "a rehearsal older than a year does not satisfy R-6.3's annual bound"
+    );
+    assert_eq!(
+        custody_shortfall_of(
+            threshold_custody(3, 5, 3, NOW + 1_000_000),
+            ConformanceTier::HighAssurance
+        ),
+        Some(CustodyShortfall::RehearsalStale),
+        "a rehearsal dated in the future is malformed and fails, as predicate 4 treats a \
+         future trust-score review"
+    );
+}
+
+#[test]
+fn test_r6_3_high_assurance_accepts_conformant_threshold() {
+    assert!(
+        custody_shortfall_of(
+            threshold_custody(3, 5, 3, NOW - 1000),
+            ConformanceTier::HighAssurance
+        )
+        .is_none(),
+        "3-of-5 with three independent parties and a recent rehearsal satisfies R-6.3"
+    );
+}
+
+/// R-6.3 is defined as "in addition to R-6.2", so a threshold declaration that lacks dual
+/// control fails on the R-6.2 element — the embedded elements are checked first.
+#[test]
+fn test_r6_3_threshold_without_dual_control_fails_on_the_r62_element() {
+    let custody = KeyCustody::Threshold {
+        boundary: boundary(),
+        dual_control: DualControl::SingleOperator,
+        quorum: Quorum { k: 3, n: 5 },
+        custodians: CustodianSeparation {
+            independent_parties: 3,
+            separation_of_duty: proc_ref("separation"),
+        },
+        ceremony: proc_ref("ceremony"),
+        recovery: proc_ref("recovery"),
+        rotation: proc_ref("rotation"),
+        last_rehearsal: Timestamp(NOW - 1000),
+    };
+    assert_eq!(
+        custody_shortfall_of(custody, ConformanceTier::HighAssurance),
+        Some(CustodyShortfall::NoDualControl),
+        "R-6.3 embeds R-6.2; the R-6.2 shortfall is what is reported"
     );
 }

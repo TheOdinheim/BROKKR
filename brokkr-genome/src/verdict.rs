@@ -7,6 +7,7 @@
 //! Acceptance path (`brokkr-barrier`); this phase adds no override and no placeholder
 //! variant.
 
+use brokkr_core::capability::ConformanceTier;
 use brokkr_core::genome::AlgorithmId;
 use brokkr_core::ids::{ModelEndpointId, ToolId};
 use brokkr_core::intent::{Capability, Invariant};
@@ -49,6 +50,40 @@ pub enum Finding {
     },
     /// Predicate 6: an invariant forbids nothing at all (a predicate that can never fire).
     InvariantForbidsNothing { invariant: Invariant },
+    /// Predicate 7 (Rev 1.21/1.22): the declared key custody does not meet the AMD-018
+    /// obligation for the genome's declared conformance tier. Carries the tier and the
+    /// specific element that failed, so a blocked report says *which* of R-6.2's or
+    /// R-6.3's requirements the declaration missed — not merely that it missed one.
+    KeyCustodyBelowTier {
+        tier: ConformanceTier,
+        element: CustodyShortfall,
+    },
+}
+
+/// Which element of the AMD-018 tier obligation a custody declaration failed.
+///
+/// Typed rather than a `String` for the same reason every other finding is: an assessor
+/// reading a blocked verdict acts on the element, and a hardware boundary that is missing
+/// is a different remediation from a dual-control procedure that is missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustodyShortfall {
+    /// R-6.2: the declaration is `SoftwareInProcess` — there is no hardware boundary.
+    NoHardwareBoundary,
+    /// R-6.2: a boundary is declared but issuance is `DualControl::SingleOperator`.
+    /// AMD-018 §AMD.5 — "a FIPS validation is not by itself evidence of dual control."
+    NoDualControl,
+    /// R-6.3: the declaration is not `Threshold` — no k-of-n custody at all.
+    NoThresholdCustody,
+    /// R-6.3: the quorum is below AMD-018's 3-of-5 floor, or malformed (`k > n`).
+    QuorumBelowFloor,
+    /// R-6.3: fewer independent parties than the quorum requires — a declared 3-of-5 whose
+    /// shares fewer than `k` parties hold. AMD-018 §AMD.3: "a share-holding arrangement in
+    /// which fewer than k independent parties can reconstruct the secret SHALL NOT satisfy
+    /// this requirement." **This is the one shortfall the gate catches on substance rather
+    /// than form**, and only because the operator was made to write the number down.
+    InsufficientCustodialSeparation,
+    /// R-6.3: the recovery rehearsal is older than a year, or dated in the future.
+    RehearsalStale,
 }
 
 /// The promotion gate's verdict (OQGF-G-4). `Promoted` or `Blocked` with every finding.
