@@ -1,7 +1,7 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.9
+**Version:** 1.10
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
 **Date:** 7 September 2026
@@ -264,6 +264,32 @@ Two rules follow, and they generalize:
 
 **Zero findings is not a pass.** A clean report may mean nothing was wrong, or it may mean nothing was looked at — and from the outside those are indistinguishable. A conformance check with zero findings SHALL state what was checked and against what. Otherwise it is an assertion, not a result.
 
+### 5.4 The reachability check — mandatory before a placed rule is accepted as buildable
+
+**For any predicate, gate, or rule placed against a value, verify that the evaluating code has a path to an instance of that value — not merely that the value's type is defined.** Record the path: the field, parameter, or seam through which the evaluator obtains it. Where there is no path, record that none exists and **stop** — that is a Section 4 gap, not something to route around.
+
+**A type that is defined but unreachable from the evaluator is, for the purpose of a placed rule, absent.**
+
+This generalizes what §5.3 already demands of a conformance verdict — *"the file, type, and function that satisfies it — **or that none does**"* — from requirements to placed rules. The check runs at Step 0 of any phase or revision that consumes a placed design, and it runs at drafting time for anyone placing one.
+
+**Why this section exists. It is not a hypothetical, and it is the fourth instance.**
+
+Architecture Rev 1.21 placed promotion-gate predicate 7 as a check of a genome's declared key custody against `genome.tier`. **No such field existed** — not on `Genome`, not on `Cbom`, not on `PolicyRegister`, and not in `promote(genome, dap_key, now)`. `ConformanceTier` was defined in `brokkr-core::capability`, but nothing carried an instance of it into the gate. The predicate was unbuildable, and the implementation stopped at Step 0 (GAP-2026-09-07-001, disposed by Rev 1.22).
+
+The revision carried a verification note stating what had been checked before drafting. It said:
+
+> *"`ConformanceTier { Baseline, Enhanced, HighAssurance }` already exists in `brokkr-core::capability`, so predicate 7 needs no new tier vocabulary."*
+
+**That sentence is true, and it is not the check that mattered.** The type's *definition* was verified; the evaluator's *path to an instance* was not. Those are different questions and only the second determines whether a rule can be written. **Existence is not reachability**, and a verification note that answers the neighbouring question reads exactly like one that answers the right one.
+
+**Three rules follow, and the third is why this is a rule rather than advice.**
+
+**Verifying that a type exists is not verifying that a rule is buildable.** `grep` finding the type is the beginning of the check, not the end. The question is whether the *specific function that will evaluate the rule* can obtain a *value* of that type from its own parameters or state.
+
+**Name the path or name its absence.** *"`promote` reaches it as `genome.tier`"* is a path. *"`ConformanceTier` exists in `brokkr-core::capability`"* is not — it names a type and no route. A placement that cannot name the route has not been checked.
+
+**Naming a pattern does not prevent repeating it.** Rev 1.21's own change log enumerated three prior instances of this exact defect — Rev 1.4's predicate 5 against a capability vocabulary that did not exist (GAP-2026-07-27-001), Rev 1.6's egress rule against personal data the flow could not see, Rev 1.7's acceptance machinery against a barrier finding with no identity (GAP-2026-07-30-001) — **and then committed the fourth, in the same document, by the same party, under a verification note claiming the check was done.** Awareness was at its maximum and was not sufficient. That is the whole argument for placing this as a checked rule rather than trusting anyone, including a future reader of this paragraph, to remember it.
+
 ---
 
 ## 6. Code standards
@@ -402,6 +428,16 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.10 — 7 September 2026.** Places **§5.4, the reachability check**, aligning to Architecture Rev 1.22 (which disposes GAP-2026-09-07-001). One addition; nothing relaxed, no invariant added, no verdict changed.
+
+- **§5.4 — for any predicate, gate, or rule placed against a value, verify that the evaluating code has a path to an instance of that value, not merely that the type is defined.** The path is recorded — the field, parameter, or seam — or its absence is recorded and work stops as a §4 gap. **A type that is defined but unreachable from the evaluator is, for the purpose of a placed rule, absent.**
+- **It generalizes §5.3 rather than adding a new discipline.** §5.3 already requires a conformance verdict to name *"the file, type, and function that satisfies it — or that none does."* §5.4 asks the same question of a placed rule before anyone tries to build it.
+- **Found by the fourth instance of one defect.** Architecture Rev 1.21 placed promotion-gate predicate 7 against `genome.tier`, a field that existed nowhere; `ConformanceTier` was defined in `brokkr-core::capability` but nothing carried an instance into `promote`. The implementation stopped at Step 0 and filed GAP-2026-09-07-001; Rev 1.22 places the field.
+- **The verification note is the thing worth recording.** Rev 1.21 asserted *"`ConformanceTier … already exists in brokkr-core::capability`, so predicate 7 needs no new tier vocabulary."* True, and not the check that mattered — the type's definition was verified and the evaluator's path to an instance was not. **Existence is not reachability**, and a note answering the neighbouring question is indistinguishable in form from one answering the right one.
+- **Why a rule and not a reminder.** Rev 1.21's own change log enumerated the three prior instances (Rev 1.4's predicate 5, Rev 1.6's egress rule, Rev 1.7's acceptance machinery) and then committed the fourth in the same document, by the same party, under a verification note claiming the check was performed. **Naming the pattern did not prevent repeating it.** Awareness was already maximal; a checked rule is what awareness was not.
+
+**What this version does not change.** No structural invariant, no code standard, no hard-list item, no conformance verdict, and no phase. §5.4 adds a check to existing practice and forbids nothing that was previously permitted except proceeding on an unverified reachability assumption. OQGF-R-6.2 remains **ABSENT** (BROKKR-ARCH §13, §14); this rule prevents the next placement defect and closes no requirement.
 
 **v1.9 — 7 September 2026.** Records the corpus growth to **AMD-018 (Key Custody Tier Resolution)**, aligning to Architecture Rev 1.20. Every change adds, tightens, or records a fact; nothing is relaxed. **No structural invariant is added, and §12.1 below states why that is a finding rather than an omission.**
 
