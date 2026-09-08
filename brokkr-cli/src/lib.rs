@@ -36,13 +36,17 @@
     clippy::unreachable
 )]
 
+pub mod probe;
+
+use crate::probe::EnvironmentProbe;
 use brokkr_audit::{
     AuditEvent, AuthorizationOutcome, AuthorizationRecord, BarrierCrossing, ProposalRecord,
     RecordedInput,
 };
 use brokkr_core::barrier::{Barrier, BarrierVerdict, BoundaryFlow, Destination};
 use brokkr_core::capability::{
-    CapabilityEnvelope, EgressRule, EvidenceProvenance, TrajectoryEntry, TrajectoryOutcome,
+    AttestationOutcome, CapabilityEnvelope, EgressRule, EnvironmentAttestation, EvidenceProvenance,
+    TrajectoryEntry, TrajectoryOutcome,
 };
 use brokkr_core::classification::Classification;
 use brokkr_core::crypto::{Attestation, Digest, HashAlg, Hasher};
@@ -57,6 +61,7 @@ use brokkr_tools::ToolExecutor;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// P-12.5 independent termination as a **latch**: once set, it stays set for the life of the
 /// session — there is no `unkill`/`unset` (16-FIX, Fix 1). The type also fixes the memory
@@ -300,6 +305,11 @@ pub struct Orchestrator {
     egress_rules: Option<Vec<EgressRule>>, // P-12.4: extracted from the signed manifest, fast lookup
     kill_switch: KillSwitch, // P-12.5: independent termination — a latch, model cannot reach it
     trajectory: Mutex<Vec<TrajectoryEntry>>, // P-12.8: the ordered session trajectory
+    // P-12.3: the environment probe, its result, and the re-attestation interval. `None` probe =
+    // **unattested**, which is recorded honestly rather than defaulted to attested (ARCH §13).
+    probe: Option<Box<dyn EnvironmentProbe>>,
+    attestation: Mutex<Option<EnvironmentAttestation>>,
+    attestation_interval: Option<Duration>,
 }
 
 impl Orchestrator {
@@ -338,6 +348,9 @@ impl Orchestrator {
             egress_rules: None,
             kill_switch: KillSwitch::new(),
             trajectory: Mutex::new(Vec::new()),
+            probe: None,
+            attestation: Mutex::new(None),
+            attestation_interval: None,
         }
     }
 
@@ -347,6 +360,115 @@ impl Orchestrator {
     pub fn with_guards(mut self, guards: Guards) -> Self {
         self.guards = guards;
         self
+    }
+
+    /// P-12.3 — install an environment probe, run it **before operation**, and record the
+    /// attestation to SAGA with evidence provenance (ARCH Rev 1.23 §6.13).
+    ///
+    /// `now` is an explicit parameter (I-13): the probe timestamp is never a wall-clock read.
+    /// `interval` is the re-attestation bound; `None` means the stored attestation never goes
+    /// stale, which a deployment should not choose.
+    ///
+    /// **The interval's own bound is not checked here, and that is deliberate.** P-12.3 requires it
+    /// not to exceed the shortest credential lifetime in the system (OQGF-M-4), and the orchestrator
+    /// sees one intent chain per hop — it cannot enumerate a deployment's credentials. That bound is
+    /// a governance obligation the DAP satisfies at configuration time; ARCH §6.13's §5.4 table
+    /// records it as **unplaced**, and inventing a check for it here would be the Rev 1.21 defect
+    /// (a rule placed against a value the evaluator cannot reach).
+    ///
+    /// A deployment that installs **no** probe is **unattested** — the attestation is `None`, no
+    /// hop is denied on attestation grounds, and P-12.3 stays open. That is the honest default: the
+    /// system does not claim a property it has not measured.
+    pub fn with_environment_probe(
+        mut self,
+        probe: Box<dyn EnvironmentProbe>,
+        interval: Option<Duration>,
+        now: Timestamp,
+    ) -> Self {
+        let attestation = probe.attest(&self.envelope, now);
+        self.record_attestation(&attestation, now);
+        // Replace the whole Mutex rather than locking it: this is a builder holding `mut self`,
+        // so there is no contention, and it avoids `expect()` (denied by §6) on a lock that cannot
+        // be poisoned at construction anyway.
+        self.attestation = Mutex::new(Some(attestation));
+        self.probe = Some(probe);
+        self.attestation_interval = interval;
+        self
+    }
+
+    /// Record an attestation to SAGA with evidence provenance (Organ 5 patch). An `Incomplete`
+    /// attestation carries its **own coverage gap** into the signed record via `evidence_gap`,
+    /// rather than presenting partial coverage as complete.
+    fn record_attestation(&self, attestation: &EnvironmentAttestation, now: Timestamp) {
+        let unprobed = attestation.unprobed();
+        let mut provenance = self.provenance("environment_probe", now);
+        if !unprobed.is_empty() {
+            provenance.observed_coverage = "partial_environment".to_string();
+            provenance.evidence_gap = Some(format!(
+                "{} capability/ies not probed: {}",
+                unprobed.len(),
+                unprobed
+                    .iter()
+                    .map(|p| format!("{:?}", p.capability))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        self.audit.record_with_provenance(
+            AuditEvent::EnvironmentAttestation(attestation.clone()),
+            self.dap.clone(),
+            now,
+            provenance,
+        );
+    }
+
+    /// The stored environment attestation, if a probe was installed (P-12.3).
+    pub fn attestation(&self) -> Option<EnvironmentAttestation> {
+        self.attestation.lock().ok().and_then(|a| a.clone())
+    }
+
+    /// P-12.3 — the per-hop attestation check. Returns `Some(Denied)` when the stored attestation
+    /// is `Discrepant`, or when it is **stale** against the configured interval.
+    ///
+    /// Reads: the stored attestation (`self.attestation`), and `now` (the `execute_hop` parameter).
+    ///
+    /// **`Discrepant` denies.** P-12.3 directs that a system be governed at the tier the *actual*
+    /// environment demands, and the honest response to "I am governed as though I cannot do X, and
+    /// I can do X" is to stop. Record-and-continue was considered and rejected in Rev 1.23: it makes
+    /// the attestation a report rather than a control.
+    ///
+    /// **`Incomplete` does NOT deny.** It is a finding about coverage, not about reachability, and
+    /// it is already recorded as an evidence gap. Denying on it would make BROKKR unrunnable
+    /// everywhere, since four capabilities are unprobeable by construction.
+    ///
+    /// The stage is `DenialStage::Gate` for the same reason the kill switch uses it: this is a
+    /// pre-gate stop, ahead of costimulation, and `DenialStage` has no finer category for one. The
+    /// **reason** carries the truth, and the full attestation is in SAGA.
+    fn check_attestation(&self, now: Timestamp) -> Option<HopResult> {
+        let guard = self.attestation.lock().ok()?;
+        let attestation = guard.as_ref()?;
+        if let AttestationOutcome::Discrepant { reachable } = &attestation.outcome {
+            return Some(HopResult::Denied {
+                stage: DenialStage::Gate,
+                reason: format!(
+                    "environment attestation discrepant (P-12.3): {} capability/ies declared \
+                     absent are reachable",
+                    reachable.len()
+                ),
+            });
+        }
+        if let Some(interval) = self.attestation_interval {
+            let age_ms = now.0.saturating_sub(attestation.probed_at.0);
+            if u128::from(age_ms) > interval.as_millis() {
+                return Some(HopResult::Denied {
+                    stage: DenialStage::Gate,
+                    reason: "environment attestation stale (P-12.3): older than the configured \
+                             re-attestation interval"
+                        .to_string(),
+                });
+            }
+        }
+        None
     }
 
     /// Install the system's [`CapabilityEnvelope`] (AMD-011). `new` defaults to
@@ -512,6 +634,14 @@ impl Orchestrator {
                 stage: DenialStage::Gate,
                 reason: "independent termination activated".to_string(),
             };
+        }
+
+        // ---- P-12.3 — environment attestation, with the kill switch, before every gate ------
+        // A `Discrepant` attestation means a capability the envelope declares absent is reachable:
+        // the declaration understates what the system can do, so the hop stops. A deployment that
+        // installed no probe is unattested and this is a no-op (ARCH Rev 1.23 §6.13).
+        if let Some(stop) = self.check_attestation(now) {
+            return stop;
         }
 
         let HopRequest {

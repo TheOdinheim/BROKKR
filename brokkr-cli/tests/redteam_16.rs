@@ -731,3 +731,139 @@ fn under_declared_envelope_is_not_detected() {
         HopResult::Executed { .. }
     ));
 }
+
+// =========================================================================================
+// OQGF-P-12.3 — environment attestation, wired into the cycle (ARCH Rev 1.23 §6.13).
+// =========================================================================================
+
+/// A probe double returning a chosen outcome. **The sanctioned way to obtain a passing
+/// attestation in a rig** — the real `LinuxProbe` is never softened, and no fixture envelope is
+/// adjusted to flatter it.
+struct FixedProbe(brokkr_core::capability::AttestationOutcome);
+impl brokkr_cli::probe::EnvironmentProbe for FixedProbe {
+    fn attest(
+        &self,
+        envelope: &brokkr_core::capability::CapabilityEnvelope,
+        now: Timestamp,
+    ) -> brokkr_core::capability::EnvironmentAttestation {
+        brokkr_core::capability::EnvironmentAttestation {
+            system_id: envelope.system_id.clone(),
+            probes: Vec::new(),
+            outcome: self.0.clone(),
+            probed_at: now,
+        }
+    }
+}
+
+/// A `Discrepant` attestation denies the hop, **before any gate** — with the kill switch, ahead of
+/// costimulation, the barrier, egress, and tool execution. P-12.3 directs that a system be governed
+/// at the tier the *actual* environment demands; the honest response to "I am governed as though I
+/// cannot do X, and I can do X" is to stop.
+#[test]
+fn test_p12_3_discrepant_attestation_denies_the_hop() {
+    let orch = ok_orch().with_environment_probe(
+        Box::new(FixedProbe(
+            brokkr_core::capability::AttestationOutcome::Discrepant {
+                reachable: vec![brokkr_core::capability::CapabilityProperty::SubAgentCreation],
+            },
+        )),
+        None,
+        Timestamp(100),
+    );
+    match orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(200)) {
+        HopResult::Denied { reason, .. } => assert!(
+            reason.contains("attestation discrepant"),
+            "the denial must name the attestation, not a gate that did not run; got {reason}"
+        ),
+        other => panic!("a Discrepant attestation must deny the hop; got {other:?}"),
+    }
+}
+
+/// An `Incomplete` attestation does **not** deny. It is a finding about coverage, not
+/// reachability, and it is already recorded as an evidence gap. Denying on it would make BROKKR
+/// unrunnable everywhere, since four capabilities are unprobeable by construction.
+#[test]
+fn test_p12_3_incomplete_attestation_does_not_deny() {
+    let orch = ok_orch().with_environment_probe(
+        Box::new(FixedProbe(
+            brokkr_core::capability::AttestationOutcome::Incomplete {
+                unprobed: vec![brokkr_core::capability::CapabilityProperty::IdentityCreation],
+            },
+        )),
+        None,
+        Timestamp(100),
+    );
+    assert!(matches!(
+        orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(200)),
+        HopResult::Executed { .. }
+    ));
+}
+
+/// A deployment that installs no probe is **unattested**: no hop is denied on attestation grounds,
+/// and P-12.3 stays open. The system does not claim a property it has not measured, and does not
+/// gate on one it does not hold.
+#[test]
+fn test_p12_3_no_probe_is_unattested_and_does_not_deny() {
+    let orch = ok_orch();
+    assert!(orch.attestation().is_none());
+    assert!(matches!(
+        orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(200)),
+        HopResult::Executed { .. }
+    ));
+}
+
+/// Staleness is checked against the **declared** interval, reading `probed_at` and the `now` the
+/// hop already carries. The interval's own bound (P-12.3: not exceeding the shortest credential
+/// lifetime) has no code path and is deliberately not checked — ARCH §6.13's §5.4 table records it
+/// as a governance obligation.
+#[test]
+fn test_p12_3_stale_attestation_denies_and_fresh_one_does_not() {
+    let orch = ok_orch().with_environment_probe(
+        Box::new(FixedProbe(
+            brokkr_core::capability::AttestationOutcome::Attested,
+        )),
+        Some(std::time::Duration::from_millis(1_000)),
+        Timestamp(1_000),
+    );
+    // Within the interval: proceeds.
+    assert!(matches!(
+        orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(1_500)),
+        HopResult::Executed { .. }
+    ));
+    // Past it: denied, naming staleness rather than a gate.
+    match orch.execute_hop(req(reasoner_dest(), attest(P1)), Timestamp(3_000)) {
+        HopResult::Denied { reason, .. } => assert!(
+            reason.contains("stale"),
+            "a stale attestation must say so; got {reason}"
+        ),
+        other => panic!("a stale attestation must deny; got {other:?}"),
+    }
+}
+
+/// The attestation is recorded to SAGA with evidence provenance, and an `Incomplete` one carries
+/// its own coverage gap into the record rather than presenting partial coverage as complete.
+#[test]
+fn test_p12_3_attestation_is_recorded_with_evidence_gap() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let orch = make(
+        Box::new(OkTool),
+        Box::new(EventSpy {
+            seen: Arc::clone(&seen),
+        }),
+    )
+    .with_environment_probe(
+        Box::new(FixedProbe(
+            brokkr_core::capability::AttestationOutcome::Attested,
+        )),
+        None,
+        Timestamp(100),
+    );
+    assert!(orch.attestation().is_some());
+    let events = seen.lock().unwrap_or_else(|p| p.into_inner());
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AuditEvent::EnvironmentAttestation(_))),
+        "the attestation must reach SAGA as its own event, not as a Signal"
+    );
+}
