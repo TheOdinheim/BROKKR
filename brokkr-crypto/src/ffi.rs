@@ -223,6 +223,8 @@ unsafe extern "C" {
     fn brokkr_pkcs7_content_sz(p7: *const c_void) -> Word32;
     fn brokkr_pkcs7_public_key_oid(p7: *const c_void) -> Word32;
     fn brokkr_pkcs7_hash_oid(p7: *const c_void) -> Word32;
+    fn brokkr_pkcs7_verify_cert(p7: *const c_void) -> *const Byte;
+    fn brokkr_pkcs7_verify_cert_sz(p7: *const c_void) -> Word32;
 
 }
 
@@ -848,6 +850,9 @@ pub struct VerifiedCms {
     pub key_oid: u32,
     /// `wc_PKCS7::hashOID` — the digest algorithm from the `SignerInfo`.
     pub hash_oid: u32,
+    /// The certificate wolfSSL actually used to verify — checked against the configured
+    /// anchor by [`cms_verify`], because a token embeds its own signer certificate.
+    pub used_cert: Vec<u8>,
 }
 
 /// Why a CMS verification failed.
@@ -931,14 +936,40 @@ pub fn cms_verify(bundle: &[u8], trust_anchor_der: &[u8]) -> Result<VerifiedCms,
         } else {
             core::slice::from_raw_parts(content_ptr, content_sz).to_vec()
         };
+        // WHICH certificate actually verified this signature. An RFC 3161 token EMBEDS its
+        // signer certificate, so `wc_PKCS7_VerifySignedData` succeeding establishes only
+        // that the token is **internally consistent** — the token vouching for itself. That
+        // is the circularity ARCH Rev 1.24 §6.9 forbids ("a pre-configured trust anchor,
+        // never one taken from the token itself"), and it is caught here rather than
+        // assumed away: found because a token verified under an unrelated anchor.
+        let cert_ptr = brokkr_pkcs7_verify_cert(p);
+        let cert_sz = brokkr_pkcs7_verify_cert_sz(p) as usize;
+        let used_cert = if cert_ptr.is_null() || cert_sz == 0 {
+            Vec::new()
+        } else {
+            core::slice::from_raw_parts(cert_ptr, cert_sz).to_vec()
+        };
         let v = VerifiedCms {
             content,
             key_oid: brokkr_pkcs7_public_key_oid(p),
             hash_oid: brokkr_pkcs7_hash_oid(p),
+            used_cert,
         };
         wc_PKCS7_Free(p);
         v
     };
+
+    // **Anchor pinning.** The signature verified — but under whose certificate? Require it
+    // to be the one configured. `SignatureInvalid` is the honest mapping: the requirement
+    // is that the signature verify *against the configured trust anchor*, and it did not.
+    //
+    // LIMIT, stated rather than implied: this is **pinning, not chain validation**. It
+    // holds when the authority's signing certificate IS the anchor (a self-signed TSA, and
+    // the local test responder). A TSA whose signing certificate is issued by a CA would
+    // need path building and validation, which is not implemented here.
+    if out.used_cert != trust_anchor_der {
+        return Err(CmsError::SignatureInvalid);
+    }
 
     if out.content.is_empty() {
         return Err(CmsError::Malformed);

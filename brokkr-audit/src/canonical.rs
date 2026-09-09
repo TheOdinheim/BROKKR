@@ -44,7 +44,7 @@ use brokkr_core::tolerance::ToleranceGrant;
 use crate::event::{
     AuditEvent, AuditRecord, AuthorizationOutcome, AuthorizationRecord, BarrierCrossing,
     ErasureTombstone, GenerationSignature, GenomePromotion, ProposalRecord, RecordedInput,
-    Timestamping,
+    TimestampSigAlg, Timestamping,
 };
 
 const DOMAIN_RECORD: &[u8] = b"brokkr-audit:record:v1";
@@ -754,11 +754,31 @@ fn write_generation_signature(c: &mut Canon, gs: &GenerationSignature) {
     write_dual_signature(c, &gs.signature);
 }
 
+/// Exhaustive, no catch-all — a new variant breaks the build rather than colliding.
+fn timestamp_sigalg_tag(a: &TimestampSigAlg) -> u8 {
+    match a {
+        TimestampSigAlg::RsaSha256 => 1,
+        TimestampSigAlg::RsaSha384 => 2,
+        TimestampSigAlg::RsaSha512 => 3,
+        TimestampSigAlg::EcdsaSha256 => 4,
+        TimestampSigAlg::EcdsaSha384 => 5,
+        TimestampSigAlg::EcdsaSha512 => 6,
+        TimestampSigAlg::Unrecognized { .. } => 7,
+    }
+}
+
 fn write_timestamping(c: &mut Canon, t: &Timestamping) {
     match t {
         Timestamping::Token(tok) => {
             c.u8(1);
             c.bytes(&tok.token);
+            c.bytes(tok.authority.as_bytes());
+            // The derived algorithm AND the two raw OIDs it was derived from, so an export
+            // recipient can re-derive rather than trust (ARCH Rev 1.25 §6.9).
+            c.u8(timestamp_sigalg_tag(&tok.algorithm));
+            c.u64(u64::from(tok.key_oid));
+            c.u64(u64::from(tok.hash_oid));
+            c.bytes(tok.gen_time.as_bytes());
         }
         Timestamping::Unavailable { reason } => {
             c.u8(2);

@@ -47,11 +47,14 @@
 
 pub mod canonical;
 pub mod event;
+pub mod rfc3161; // the RFC 3161 client (OQGF-A-3)
 pub mod saga;
 
 pub use event::{
     AuditEvent, AuditRecord, AuthorizationOutcome, AuthorizationRecord, BarrierCrossing,
     CryptoGeneration, ErasureTombstone, GenerationSignature, GenomePromotion, ProposalRecord,
-    RecordedInput, TimestampAuthority, TimestampError, TimestampToken, Timestamping,
+    RecordedInput, TimestampAuthority, TimestampError, TimestampSigAlg, TimestampToken,
+    Timestamping,
 };
+pub use rfc3161::Rfc3161Client;
 pub use saga::{ChainStatus, Saga, SagaError, SignedExport, SubjectDatum};

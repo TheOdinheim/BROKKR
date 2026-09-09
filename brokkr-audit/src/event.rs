@@ -44,10 +44,74 @@ pub struct GenerationSignature {
     pub signature: DualSignature,
 }
 
-/// An RFC 3161 token (opaque bytes) from a PQC-signing authority (OQGF-A-3).
+/// An RFC 3161 token, with the facts a reader needs in order to weigh it
+/// (OQGF-A-3; ARCH Rev 1.24/1.25 §6.9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimestampToken {
+    /// The opaque token bytes, retained so an assessor can re-verify independently.
     pub token: Vec<u8>,
+    /// Which authority issued it, so a third-party attestation is distinguishable from a
+    /// **self-hosted** one without reading a config file. A self-hosted responder
+    /// satisfies the mechanism and fails the Organ 5 independence principle — the
+    /// governed system is not the authority over its own evidence.
+    pub authority: String,
+    /// **Derived** from `key_oid` + `hash_oid`, not read from
+    /// `SignerInfo.signatureAlgorithm`: wolfSSL consumes that field during parsing and
+    /// retains it nowhere, so no accessor can expose it (ARCH Rev 1.25 §6.9, recorded as
+    /// an unplaced rule in the §5.4 table).
+    pub algorithm: TimestampSigAlg,
+    /// `wc_PKCS7::publicKeyOID` — the signer's key type, raw.
+    pub key_oid: u32,
+    /// `wc_PKCS7::hashOID` — the digest algorithm, raw.
+    ///
+    /// Both OIDs are retained beside the derived `algorithm` so a reader can **re-derive
+    /// it rather than trust it**.
+    pub hash_oid: u32,
+    /// The `genTime` the authority asserted, as it wrote it. BROKKR does not reconcile it
+    /// against its own clock: a disagreement is a finding for a reader, not something a
+    /// recorder should quietly resolve.
+    pub gen_time: String,
+}
+
+/// The timestamp authority's signature algorithm, **derived** from the signer's key type
+/// and the digest algorithm (ARCH Rev 1.25 §6.9).
+///
+/// **Every variant here is classical**, because no publicly operated RFC 3161 authority
+/// signs post-quantum today. That is a fact about the world with the same shape as
+/// BIFRÖST's channel strength collapsing to `Classical`: the mechanism is correct and
+/// reports the honest result. It is why OQGF-A-3 stays PARTIAL on the **PQC clause** even
+/// once this path ships.
+///
+/// **No curve is named for ECDSA.** `wc_PKCS7::publicKeyOID` carries `ECDSAk` — the key
+/// *family* — and not the curve, so a variant asserting P-256 or P-384 would claim
+/// something the observation does not support (§7's FFI honesty rule: never a fabricated
+/// identity).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimestampSigAlg {
+    RsaSha256,
+    RsaSha384,
+    RsaSha512,
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
+    /// A pair BROKKR does not recognize, carried **verbatim and never guessed**.
+    Unrecognized {
+        key_oid: u32,
+        hash_oid: u32,
+    },
+}
+
+impl TimestampSigAlg {
+    /// `false` for **every** variant, including `Unrecognized`.
+    ///
+    /// Treating an unknown pair as possibly-post-quantum would let an unidentifiable
+    /// algorithm satisfy the clause it cannot be shown to satisfy — the
+    /// substance-versus-mechanism failure AMD-018 §AMD.2.1 legislates against. When a
+    /// post-quantum authority exists it gains a variant, and this method is where that
+    /// change becomes visible.
+    pub fn is_post_quantum(&self) -> bool {
+        false
+    }
 }
 
 /// Whether a record carries a trusted timestamp — and if not, that fact, **recorded rather
@@ -233,8 +297,15 @@ pub trait TimestampAuthority: Send + Sync {
 pub enum TimestampError {
     /// The authority was configured but unreachable.
     Unreachable,
-    /// The authority returned a malformed token.
+    /// The response did not parse as CMS/TSTInfo. **"Did not parse" and nothing else** —
+    /// it must not absorb a signature failure or an imprint mismatch (ARCH Rev 1.24 §6.9).
     Malformed,
+    /// It parsed, and its signature did not verify against the configured trust anchor.
+    SignatureInvalid,
+    /// It parsed and verified, and its `messageImprint` is **not** the digest of what
+    /// BROKKR sent — a substituted response, or an authority stamping other bytes.
+    /// **The one variant here that is an attack signature.**
+    ImprintMismatch,
 }
 
 impl core::fmt::Display for TimestampError {
@@ -243,6 +314,12 @@ impl core::fmt::Display for TimestampError {
             TimestampError::Unreachable => f.write_str("timestamp authority unreachable"),
             TimestampError::Malformed => {
                 f.write_str("timestamp authority returned a malformed token")
+            }
+            TimestampError::SignatureInvalid => {
+                f.write_str("timestamp token signature did not verify")
+            }
+            TimestampError::ImprintMismatch => {
+                f.write_str("timestamp token attests a different message imprint than was sent")
             }
         }
     }

@@ -62,6 +62,25 @@ unsigned int brokkr_pkcs7_hash_oid(const wc_PKCS7 *p7) {
     return (unsigned int)p7->hashOID;
 }
 
+/* The certificate wolfSSL ACTUALLY used to verify the signature — taken from the bundle's
+ * own cert array, not from what the caller supplied. Exposing it is what lets the caller
+ * check that the signer is the configured anchor rather than whoever the token nominated:
+ * an RFC 3161 token embeds its signer cert, so wc_PKCS7_VerifySignedData alone establishes
+ * that a token is INTERNALLY CONSISTENT, not that it came from a trusted authority. */
+const unsigned char *brokkr_pkcs7_verify_cert(const wc_PKCS7 *p7) {
+    if (p7 == 0) {
+        return 0;
+    }
+    return p7->verifyCert;
+}
+
+unsigned int brokkr_pkcs7_verify_cert_sz(const wc_PKCS7 *p7) {
+    if (p7 == 0) {
+        return 0;
+    }
+    return (unsigned int)p7->verifyCertSz;
+}
+
 /* sizeof(wc_PKCS7), so Rust can heap-allocate a correctly sized opaque buffer without
  * assuming a size — the ffi.rs pattern (probed sizes, opaque pointers), obtained from the
  * compiler instead of from a probe. */

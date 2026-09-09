@@ -98,6 +98,14 @@ impl TimestampAuthority for EchoTsa {
     fn stamp(&self, canonical: &[u8]) -> Result<TimestampToken, brokkr_audit::TimestampError> {
         Ok(TimestampToken {
             token: canonical.to_vec(),
+            authority: "echo-test-double".to_string(),
+            algorithm: brokkr_audit::TimestampSigAlg::Unrecognized {
+                key_oid: 0,
+                hash_oid: 0,
+            },
+            key_oid: 0,
+            hash_oid: 0,
+            gen_time: "19700101000000Z".to_string(),
         })
     }
 }
