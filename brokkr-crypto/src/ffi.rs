@@ -206,6 +206,24 @@ unsafe extern "C" {
         aad: *const Byte,
         aadSz: Word32,
     ) -> c_int;
+
+    // ---- PKCS#7 / CMS (RFC 3161 token verification, OQGF-A-3) ----------------------
+    // Enabled by the -DWOLFSSL_PKCS7=yes rebuild. `wc_PKCS7` is opaque here: it is only
+    // ever held behind a pointer and sized by the shim, never laid out in Rust.
+    fn wc_PKCS7_Init(pkcs7: *mut c_void, heap: *mut c_void, devId: c_int) -> c_int;
+    fn wc_PKCS7_InitWithCert(pkcs7: *mut c_void, der: *mut Byte, derSz: Word32) -> c_int;
+    fn wc_PKCS7_VerifySignedData(pkcs7: *mut c_void, pkiMsg: *mut Byte, pkiMsgSz: Word32) -> c_int;
+    fn wc_PKCS7_Free(pkcs7: *mut c_void);
+
+    // ---- the accessor shim (csrc/brokkr_pkcs7_shim.c; ARCH Rev 1.25 §6.9) ----------
+    // Compiled with the library's own headers, so these read the same struct layout
+    // wolfSSL does. They expose fields and do nothing else.
+    fn brokkr_pkcs7_sizeof() -> Word32;
+    fn brokkr_pkcs7_content(p7: *const c_void) -> *const Byte;
+    fn brokkr_pkcs7_content_sz(p7: *const c_void) -> Word32;
+    fn brokkr_pkcs7_public_key_oid(p7: *const c_void) -> Word32;
+    fn brokkr_pkcs7_hash_oid(p7: *const c_void) -> Word32;
+
 }
 
 /// A wolfCrypt error return (0 = success).
@@ -808,4 +826,122 @@ impl Drop for SlhDsaShake192sPublic {
         // SAFETY: p is the live key initialized in from_public_bytes; Free runs once.
         unsafe { wc_SlhDsaKey_Free(p) };
     }
+}
+
+// =========================================================================================
+// PKCS#7 / CMS verification for RFC 3161 (OQGF-A-3; ARCH Rev 1.25 §6.9)
+// =========================================================================================
+
+/// What a verified CMS `SignedData` yields: the authenticated eContent and the two OIDs
+/// the signature algorithm is **derived** from.
+///
+/// `SignerInfo.signatureAlgorithm` — the field that names the algorithm outright — is
+/// consumed by wolfSSL during parsing and retained in no struct field, so no accessor can
+/// expose it (ARCH Rev 1.25 §6.9, recorded as an unplaced rule in the §5.4 table). Both
+/// OIDs are carried out raw so the derivation can be checked rather than trusted.
+pub struct VerifiedCms {
+    /// The DER `TSTInfo`. **Authenticated** — the CMS signature over it verified against
+    /// the supplied trust anchor — but not thereby *trustworthy*: a compromised authority
+    /// can sign arbitrary content.
+    pub content: Vec<u8>,
+    /// `wc_PKCS7::publicKeyOID` — the signer's key type.
+    pub key_oid: u32,
+    /// `wc_PKCS7::hashOID` — the digest algorithm from the `SignerInfo`.
+    pub hash_oid: u32,
+}
+
+/// Why a CMS verification failed.
+///
+/// **The two variants are kept apart deliberately**, because the caller maps them to
+/// `TimestampError::Malformed` and `TimestampError::SignatureInvalid`, and ARCH Rev 1.24
+/// §6.9 is explicit that *"`Malformed` means 'this did not parse'"* and must not absorb a
+/// signature failure. Collapsing them here would make that distinction unrecoverable at
+/// the only layer that can report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmsError {
+    /// The bundle did not parse as CMS `SignedData` (`ASN_PARSE_E`, `ASN_INPUT_E`, or a
+    /// setup failure before any signature was examined).
+    Malformed,
+    /// It parsed, and the signature did not verify against the supplied trust anchor
+    /// (`ASN_SIG_CONFIRM_E`, `SIG_VERIFY_E`).
+    SignatureInvalid,
+}
+
+/// `wolfssl/wolfcrypt/error-crypt.h`: ASN parsing error, invalid input.
+const ASN_PARSE_E: c_int = -140;
+/// `error-crypt.h`: ASN signature error, confirm failure.
+const ASN_SIG_CONFIRM_E: c_int = -155;
+/// `error-crypt.h`: wolfcrypt signature verify error.
+const SIG_VERIFY_E: c_int = -229;
+
+/// Map a `wc_PKCS7_VerifySignedData` return code to the two outcomes the caller must tell
+/// apart. Anything that is neither a recognized parse error nor a recognized signature
+/// error is reported as `Malformed` — **the fail-closed direction**: an unrecognized
+/// failure has not established that a signature was checked and found wrong, so claiming
+/// `SignatureInvalid` would assert more than was observed.
+fn cms_error_from(rc: c_int) -> CmsError {
+    match rc {
+        ASN_SIG_CONFIRM_E | SIG_VERIFY_E => CmsError::SignatureInvalid,
+        ASN_PARSE_E => CmsError::Malformed,
+        _ => CmsError::Malformed,
+    }
+}
+
+/// Verify a CMS `SignedData` bundle against `trust_anchor_der`, returning the
+/// authenticated eContent and the derivation OIDs.
+pub fn cms_verify(bundle: &[u8], trust_anchor_der: &[u8]) -> Result<VerifiedCms, CmsError> {
+    // The wc_PKCS7 handle is opaque: sized by the shim (which asks the compiler) and only
+    // ever held behind a pointer. This is the ffi.rs discipline — no Rust-side layout
+    // assumption — with the size obtained from the compiler rather than from a probe.
+    // SAFETY: brokkr_pkcs7_sizeof is a pure `sizeof` in the shim; no pointers involved.
+    let size = unsafe { brokkr_pkcs7_sizeof() } as usize;
+    if size == 0 {
+        return Err(CmsError::Malformed);
+    }
+    let mut handle: Vec<u8> = vec![0u8; size];
+    let p = handle.as_mut_ptr().cast::<c_void>();
+
+    let mut anchor = trust_anchor_der.to_vec();
+    let mut msg = bundle.to_vec();
+
+    // SAFETY: `p` points to a zeroed buffer of exactly sizeof(wc_PKCS7), which is what
+    // wc_PKCS7_Init requires. heap=NULL and devId=INVALID_DEVID(-2) match the crate's
+    // existing calls. On any failure we free before returning, and the buffer outlives
+    // every call because `handle` is not dropped until the end of the function.
+    let out = unsafe {
+        if wc_PKCS7_Init(p, ptr::null_mut(), -2) != 0 {
+            return Err(CmsError::Malformed);
+        }
+        // InitWithCert supplies the trust anchor. wolfSSL takes the cert by pointer for
+        // the lifetime of the handle; `anchor` outlives the Free below.
+        if wc_PKCS7_InitWithCert(p, anchor.as_mut_ptr(), anchor.len() as Word32) != 0 {
+            wc_PKCS7_Free(p);
+            return Err(CmsError::Malformed);
+        }
+        let rc = wc_PKCS7_VerifySignedData(p, msg.as_mut_ptr(), msg.len() as Word32);
+        if rc != 0 {
+            wc_PKCS7_Free(p);
+            return Err(cms_error_from(rc));
+        }
+        // Only after a successful verify are the content accessors meaningful.
+        let content_ptr = brokkr_pkcs7_content(p);
+        let content_sz = brokkr_pkcs7_content_sz(p) as usize;
+        let content = if content_ptr.is_null() || content_sz == 0 {
+            Vec::new()
+        } else {
+            core::slice::from_raw_parts(content_ptr, content_sz).to_vec()
+        };
+        let v = VerifiedCms {
+            content,
+            key_oid: brokkr_pkcs7_public_key_oid(p),
+            hash_oid: brokkr_pkcs7_hash_oid(p),
+        };
+        wc_PKCS7_Free(p);
+        v
+    };
+
+    if out.content.is_empty() {
+        return Err(CmsError::Malformed);
+    }
+    Ok(out)
 }
