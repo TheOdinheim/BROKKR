@@ -97,7 +97,9 @@ fn path_to_timestamp_error(e: PathError) -> TimestampError {
         PathError::SignatureInvalid => TimestampError::SignatureInvalid,
         PathError::Expired => TimestampError::CertificateExpired,
         PathError::NotYetValid => TimestampError::CertificateNotYetValid,
-        PathError::NotTimestamping => TimestampError::NotTimestampingCertificate,
+        PathError::TimestampingEkuAbsent => TimestampError::NotTimestampingCertificate,
+        PathError::TimestampingEkuNotCritical => TimestampError::TimestampingEkuNotCritical,
+        PathError::TimestampingEkuNotExclusive => TimestampError::TimestampingEkuNotExclusive,
         PathError::Malformed => TimestampError::Malformed,
     }
 }

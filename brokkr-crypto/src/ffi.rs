@@ -1056,18 +1056,39 @@ pub enum PathError {
     /// `ASN_BEFORE_DATE_E` (−150): the certificate is not yet valid — usually a local clock
     /// problem, which in a component whose purpose is attesting time deserves its own word.
     NotYetValid,
-    /// The leaf does not satisfy RFC 3161 §2.3's extended-key-usage requirement: either it
-    /// does not carry `id-kp-timeStamping`, or it carries it **non-critically**. Not a
-    /// wolfSSL code: policy RFC 3161 requires and `CertManagerVerifyBuffer` does not
-    /// enforce.
+    /// The leaf does not carry `id-kp-timeStamping` at all — RFC 3161 §2.3 obligation 1.
     ///
-    /// **One variant covers both conditions**, which is what the placed design assigns
-    /// (ARCH Rev 1.26 §6.9 names no second variant). The two are arguably different
-    /// investigations — a missing EKU means the wrong certificate is configured, while a
-    /// non-critical one means the *right* authority was issued a non-conformant
-    /// certificate — but splitting them is a type change the DAP places, not one the
-    /// builder invents.
-    NotTimestamping,
+    /// **This is not a timestamping certificate**: a TLS client certificate, say, pointed at
+    /// the timestamp endpoint. Categorically different from the two variants below, which
+    /// say the certificate *is* a TSA certificate that fails a conformance clause. The
+    /// operator fixes the **deployment** — the wrong certificate or the wrong endpoint is
+    /// configured (ARCH Rev 1.27 §6.9).
+    TimestampingEkuAbsent,
+    /// The leaf carries `id-kp-timeStamping`, but the extension is **not critical** —
+    /// RFC 3161 §2.3 obligation 2, "This extension MUST be critical."
+    ///
+    /// Not a formality: a non-critical extension MAY be ignored by a verifier that does not
+    /// understand it, so claiming timestamping non-critically permits exactly the reading
+    /// the restriction exists to forbid. The right authority holds a certificate its CA
+    /// flagged wrong; the operator asks the authority to **re-issue**.
+    TimestampingEkuNotCritical,
+    /// The leaf carries `id-kp-timeStamping` **and at least one other recognized purpose** —
+    /// RFC 3161 §2.3 obligation 3, read as purpose exclusivity.
+    ///
+    /// **Substantive, where non-criticality is a flag.** §2.3 opens "The TSA MUST sign each
+    /// time-stamp message with a key reserved specifically for that purpose"; a certificate
+    /// carrying `timeStamping` and `clientAuth` describes a key that is **not reserved** —
+    /// the same private key authenticates TLS clients and attests time. A deployment might
+    /// weigh that and carry it as an OQGF-P-9 Accountable Risk Acceptance against a
+    /// commercially important authority, which is a decision `TimestampingEkuAbsent` can
+    /// never sensibly receive — which is why the two are not one variant.
+    ///
+    /// **Bounded, and the bound is named in ARCH §13:** enforcement is over the purposes
+    /// wolfSSL's decoder recognizes. `DecodeExtKeyUsage` skips unknown OIDs without setting
+    /// a bit, so `timeStamping` plus a private OID reads `0x20` and passes. OpenSSL accepts
+    /// the same certificate under `-purpose timestampsign`, so this is the bound standard
+    /// practice has, recorded rather than implied.
+    TimestampingEkuNotExclusive,
     /// An anchor could not be loaded, or the certificate did not parse.
     Malformed,
 }
@@ -1095,8 +1116,8 @@ fn path_error_from(rc: c_int) -> PathError {
 }
 
 /// Validate `leaf_der` against `root_der` plus `intermediates_der` (root-first trust order)
-/// under RFC 5280, then require the leaf to carry `id-kp-timeStamping` **as a critical
-/// extension** (RFC 3161 §2.3).
+/// under RFC 5280, then require the leaf to satisfy all three RFC 3161 §2.3 obligations:
+/// carry `id-kp-timeStamping`, **critically**, and **exclusively**.
 ///
 /// **What this proves:** the leaf chains to an anchor this deployment configured, and is
 /// authorized to timestamp. **What it does not:** that the authority's clock is right, or
@@ -1146,12 +1167,10 @@ pub fn verify_cert_path(
         }
     }
 
-    // RFC 3161 policy, checked separately because the CertManager does not enforce it.
-    // Both conjuncts: present AND critical (§2.3). A leaf claiming timestamping
-    // non-critically is refused — see `TimestampingEku`.
-    if !cert_timestamping_eku(leaf_der)?.satisfies_rfc3161() {
-        return Err(PathError::NotTimestamping);
-    }
+    // RFC 3161 §2.3 policy, checked separately because the CertManager does not enforce it.
+    // All three obligations — carriage, criticality, exclusivity — and the verdict names
+    // WHICH one failed rather than collapsing three different remediations into one word.
+    cert_timestamping_eku(leaf_der)?.rfc3161_verdict()?;
     Ok(())
 }
 
@@ -1169,24 +1188,59 @@ pub struct TimestampingEku {
     /// understand it, so claiming timestamping non-critically permits precisely the
     /// reading the restriction exists to forbid.
     pub critical: bool,
+    /// The extension carries **only** `id-kp-timeStamping` among the purposes wolfSSL
+    /// recognizes — `extExtKeyUsage == EXTKEYUSE_TIMESTAMP`, an **equality**, not a bit
+    /// test. RFC 3161 §2.3 read as purpose exclusivity, which is the reading corroborated
+    /// by OpenSSL refusing `timeStamping+clientAuth` under `-purpose timestampsign`.
+    ///
+    /// **False for a certificate with no EKU at all** (`0x00 != 0x20`), which is why
+    /// `present` is checked first — see [`TimestampingEku::rfc3161_verdict`].
+    pub exclusive: bool,
 }
 
 impl TimestampingEku {
-    /// Whether this certificate satisfies RFC 3161 §2.3 — present **and** critical.
+    /// The RFC 3161 §2.3 verdict, naming **which** clause failed.
     ///
-    /// Both conjuncts, deliberately: `present` alone was the check through ARCH Rev 1.26,
-    /// which left the placed criticality clause half-implemented and admitted a leaf
-    /// carrying a non-critical timestamping EKU (observed: `extExtKeyUsage = 0x20`,
-    /// `extExtKeyUsageCrit = 0`).
+    /// The three obligations are checked in order of how fundamental they are, and the
+    /// **first** failure is returned — the same first-failing-check convention the tolerance
+    /// controller uses (ARCH §6.7), and for the same reason: reporting a second finding that
+    /// was never reached would state something the check did not establish.
+    ///
+    /// The order is not arbitrary. A certificate with no timestamping EKU is not a TSA
+    /// certificate, so its criticality and exclusivity are moot. A certificate whose
+    /// extension is non-critical may be **ignored entirely** by a relying party, so what
+    /// purposes that extension lists is moot in turn. Hence absent → not critical → not
+    /// exclusive.
+    pub fn rfc3161_verdict(&self) -> Result<(), PathError> {
+        if !self.present {
+            return Err(PathError::TimestampingEkuAbsent);
+        }
+        if !self.critical {
+            return Err(PathError::TimestampingEkuNotCritical);
+        }
+        if !self.exclusive {
+            return Err(PathError::TimestampingEkuNotExclusive);
+        }
+        Ok(())
+    }
+
+    /// Whether this certificate satisfies RFC 3161 §2.3 — all three obligations.
+    ///
+    /// All three, deliberately. `present` alone was the check through ARCH Rev 1.26, which
+    /// admitted a leaf carrying a non-critical timestamping EKU (observed `0x20` / crit `0`);
+    /// `present && critical` was the check through Rev 1.27, which admitted a leaf carrying
+    /// `timeStamping+clientAuth` (observed `0x24`).
     pub fn satisfies_rfc3161(&self) -> bool {
-        self.present && self.critical
+        self.rfc3161_verdict().is_ok()
     }
 }
 
-/// Read `cert_der`'s timestamping extended-key-usage state — presence and criticality.
+/// Read `cert_der`'s timestamping extended-key-usage state — presence, criticality, and
+/// exclusivity.
 ///
 /// Parsed with `NO_VERIFY`: the chain decision is the Certificate Manager's and has already
-/// been made. This reads two bits, in one parse.
+/// been made. This reads two fields, in one parse — and derives all three facts from them,
+/// so exclusivity needed **no new accessor** (ARCH Rev 1.27 §6.9).
 pub fn cert_timestamping_eku(cert_der: &[u8]) -> Result<TimestampingEku, PathError> {
     // SAFETY: brokkr_decoded_cert_sizeof is a pure `sizeof` in the shim.
     let size = unsafe { brokkr_decoded_cert_sizeof() } as usize;
@@ -1213,6 +1267,10 @@ pub fn cert_timestamping_eku(cert_der: &[u8]) -> Result<TimestampingEku, PathErr
         Ok(TimestampingEku {
             present: eku & timestamp_bit != 0,
             critical: crit != 0,
+            // EQUALITY, not a bit test: any additional recognized purpose sets an extra bit
+            // and fails this. `timeStamping+clientAuth` reads 0x24 and
+            // `timeStamping+anyExtendedKeyUsage` reads 0x21 — both observed.
+            exclusive: eku == timestamp_bit,
         })
     }
 }

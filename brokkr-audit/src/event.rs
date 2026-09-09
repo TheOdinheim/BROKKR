@@ -321,13 +321,36 @@ pub enum TimestampError {
     /// The signer certificate is not yet valid — usually a local clock problem, which in a
     /// component whose whole purpose is attesting time deserves its own word.
     CertificateNotYetValid,
-    /// The signer certificate does not satisfy RFC 3161 §2.3: it either lacks
-    /// `id-kp-timeStamping` or carries it **non-critically**.
-    /// `wolfSSL_CertManagerVerifyBuffer` performs path validation and does **not** enforce
-    /// application EKU policy, so nothing checks either condition unless the client does.
+    /// The signer certificate does not carry `id-kp-timeStamping` at all — RFC 3161 §2.3
+    /// obligation 1. `wolfSSL_CertManagerVerifyBuffer` performs path validation and does
+    /// **not** enforce application EKU policy, so nothing checks this unless the client does.
     ///
-    /// **Both conditions map here**, per the placed design, which names no second variant.
+    /// **The asymmetric name is deliberate, not churn avoidance** (ARCH Rev 1.27 §6.9). It is
+    /// *true* of this case and only this case: the certificate is not a timestamping
+    /// certificate. It would be a **false** name for the two variants below, where the
+    /// certificate **is** a timestamping certificate that fails a conformance clause.
+    /// Renaming it for symmetry would trade a true name for a tidy one.
+    ///
+    /// The operator fixes the **deployment**: the wrong certificate, or the wrong endpoint.
     NotTimestampingCertificate,
+    /// The signer certificate carries `id-kp-timeStamping`, but **not critically** —
+    /// RFC 3161 §2.3 obligation 2.
+    ///
+    /// The endpoint is correct and the authority is the right one; its CA flagged the
+    /// certificate wrong. **The operator asks the authority to re-issue** — different work
+    /// from `NotTimestampingCertificate`, which is why it is a different word.
+    TimestampingEkuNotCritical,
+    /// The signer certificate carries `id-kp-timeStamping` **and another recognized
+    /// purpose** — RFC 3161 §2.3 obligation 3, read as purpose exclusivity.
+    ///
+    /// **Substantive where non-criticality is a flag**: §2.3 requires a key "reserved
+    /// specifically for that purpose", and a certificate that also authenticates TLS clients
+    /// describes a key that is not reserved. Shares a remediation with
+    /// `TimestampingEkuNotCritical` and is still distinct, because a multi-purpose signing
+    /// key is a key-reuse finding a deployment might weigh and carry as an OQGF-P-9
+    /// Accountable Risk Acceptance — a decision `NotTimestampingCertificate` can never
+    /// sensibly receive.
+    TimestampingEkuNotExclusive,
 }
 
 /// How the token's signer certificate is trusted (OQGF-A-3; ARCH Rev 1.26 §6.9).
@@ -386,8 +409,15 @@ impl core::fmt::Display for TimestampError {
                 f.write_str("timestamp signer certificate is not yet valid")
             }
             TimestampError::NotTimestampingCertificate => f.write_str(
-                "timestamp signer certificate lacks a critical id-kp-timeStamping extended \
-                 key usage",
+                "timestamp signer certificate lacks the id-kp-timeStamping extended key usage",
+            ),
+            TimestampError::TimestampingEkuNotCritical => f.write_str(
+                "timestamp signer certificate carries id-kp-timeStamping but the extended \
+                 key usage extension is not marked critical",
+            ),
+            TimestampError::TimestampingEkuNotExclusive => f.write_str(
+                "timestamp signer certificate carries id-kp-timeStamping alongside another \
+                 key purpose; RFC 3161 requires a key reserved to timestamping",
             ),
         }
     }

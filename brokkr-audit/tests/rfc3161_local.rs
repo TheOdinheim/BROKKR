@@ -259,7 +259,7 @@ fn test_a3_absent_authority_still_records() {
 
 /// Build a throwaway CA plus a set of leaves exercising every path-validation outcome.
 /// Returns the directory; DER files are `ca.der`, `good.der`, `noteku.der`, `noncrit.der`,
-/// `expired.der`, `future.der`, `other.der`.
+/// `both.der`, `anyeku.der`, `expired.der`, `future.der`, `other.der`.
 fn ca_dir() -> PathBuf {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -278,6 +278,11 @@ fn ca_dir() -> PathBuf {
          [ tsa_ext ]\nextendedKeyUsage = critical,timeStamping\n\
          basicConstraints = critical,CA:FALSE\n\
          [ tsa_noncrit_ext ]\nextendedKeyUsage = timeStamping\n\
+         basicConstraints = critical,CA:FALSE\n\
+         [ tsa_both_ext ]\nextendedKeyUsage = critical,timeStamping,clientAuth\n\
+         basicConstraints = critical,CA:FALSE\n\
+         [ tsa_anyeku_ext ]\n\
+         extendedKeyUsage = critical,timeStamping,anyExtendedKeyUsage\n\
          basicConstraints = critical,CA:FALSE\n\
          [ noteku_ext ]\nextendedKeyUsage = critical,clientAuth\n\
          basicConstraints = critical,CA:FALSE\n",
@@ -320,12 +325,16 @@ fn ca_dir() -> PathBuf {
 
     // Leaves. `-startdate`/`-enddate` are what make the expired and not-yet-valid cases
     // observable; without them those two mappings could only be read out of a header.
-    let leaves: [(&str, &str, &str, &str); 5] = [
+    let leaves: [(&str, &str, &str, &str); 7] = [
         ("good", "tsa_ext", "20250101000000Z", "20350101000000Z"),
         ("noteku", "noteku_ext", "20250101000000Z", "20350101000000Z"),
         // Carries id-kp-timeStamping, but NOT critical. RFC 3161 §2.3 refuses it, and it is
         // the case that passed every check through ARCH Rev 1.26.
         ("noncrit", "tsa_noncrit_ext", "20250101000000Z", "20350101000000Z"),
+        // Carries id-kp-timeStamping AND another purpose, so the key is not reserved to
+        // timestamping. `both` reads 0x24, `anyeku` reads 0x21 — both observed.
+        ("both", "tsa_both_ext", "20250101000000Z", "20350101000000Z"),
+        ("anyeku", "tsa_anyeku_ext", "20250101000000Z", "20350101000000Z"),
         ("expired", "tsa_ext", "20200101000000Z", "20200201000000Z"),
         ("future", "tsa_ext", "20300101000000Z", "20310101000000Z"),
     ];
@@ -427,7 +436,7 @@ fn test_a3_signer_without_timestamping_eku_is_refused() {
     // ...and the full check refuses it even though the chain is sound.
     let e = brokkr_crypto::ffi::verify_cert_path(&noteku, &root, &[])
         .expect_err("a non-timestamping certificate must not be accepted as a TSA signer");
-    assert_eq!(e, brokkr_crypto::ffi::PathError::NotTimestamping);
+    assert_eq!(e, brokkr_crypto::ffi::PathError::TimestampingEkuAbsent);
     assert_eq!(
         path_err_to_ts(e),
         TimestampError::NotTimestampingCertificate
@@ -482,13 +491,121 @@ fn test_a3_non_critical_timestamping_eku_is_refused() {
     // ...and the full check refuses it, even though the chain is sound and the EKU is there.
     let e = brokkr_crypto::ffi::verify_cert_path(&noncrit, &root, &[])
         .expect_err("a non-critical timestamping EKU must not be accepted as a TSA signer");
-    assert_eq!(e, brokkr_crypto::ffi::PathError::NotTimestamping);
+    assert_eq!(e, brokkr_crypto::ffi::PathError::TimestampingEkuNotCritical);
     assert_eq!(
         path_err_to_ts(e),
-        TimestampError::NotTimestampingCertificate,
-        "the placed design assigns one variant to both EKU failures; if that distinction \
-         is ever split, this assertion is where it surfaces"
+        TimestampError::TimestampingEkuNotCritical,
+        "and it must NOT report NotTimestampingCertificate: this certificate IS a \
+         timestamping certificate, and saying otherwise sends the operator to fix a \
+         deployment that is correct"
     );
+    assert_ne!(
+        path_err_to_ts(e),
+        TimestampError::NotTimestampingCertificate
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A signer whose extended key usage carries `id-kp-timeStamping` **alongside another
+/// purpose** is refused: RFC 3161 §2.3 requires a key reserved to timestamping.
+///
+/// **Exclusivity is enforced by equality, not a bit test.** `extExtKeyUsage == 0x20`, so any
+/// additional recognized purpose sets an extra bit and fails — `timeStamping+clientAuth`
+/// reads `0x24`, `timeStamping+anyExtendedKeyUsage` reads `0x21`. A bit test would accept
+/// both, which is what the check did through ARCH Rev 1.27.
+///
+/// **The `anyExtendedKeyUsage` case is the one this test must not omit.** It carries the
+/// timestamping bit, so every presence check passes it, while `anyEKU` nullifies the entire
+/// EKU restriction — it is the only multi-purpose certificate a CA might plausibly think
+/// harmless, and it is the one that would do the most damage.
+///
+/// Both are refused by OpenSSL under `-purpose timestampsign` too, which is the independent
+/// corroboration that purpose exclusivity is the right reading of §2.3.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_non_exclusive_timestamping_eku_is_refused() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+
+    // The conforming leaf is exclusive.
+    let g = brokkr_crypto::ffi::cert_timestamping_eku(&good).expect("parse good");
+    assert!(g.exclusive, "critical,timeStamping alone is exclusive (0x20)");
+    assert!(g.satisfies_rfc3161());
+    assert_eq!(g.rfc3161_verdict(), Ok(()));
+
+    for (name, why) in [
+        ("both", "timeStamping+clientAuth (0x24): the key also authenticates TLS clients"),
+        ("anyeku", "timeStamping+anyExtendedKeyUsage (0x21): anyEKU nullifies the restriction"),
+    ] {
+        let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
+        let eku = brokkr_crypto::ffi::cert_timestamping_eku(&der).expect("parse");
+
+        // Present and critical — so this is NOT a duplicate of either earlier test, and a
+        // presence-or-criticality check would have accepted it.
+        assert!(eku.present, "{name}: carries id-kp-timeStamping — {why}");
+        assert!(eku.critical, "{name}: and carries it critically");
+        assert!(!eku.exclusive, "{name}: but not exclusively");
+        assert!(!eku.satisfies_rfc3161());
+
+        let e = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[])
+            .unwrap_err();
+        assert_eq!(
+            e,
+            brokkr_crypto::ffi::PathError::TimestampingEkuNotExclusive,
+            "{name}: a multi-purpose signing key must be named as such"
+        );
+        assert_eq!(
+            path_err_to_ts(e),
+            TimestampError::TimestampingEkuNotExclusive,
+            "{name}: and the distinction must survive into the record-level error, where an \
+             operator reads it — this is the finding a deployment might carry as an AMD-006 \
+             acceptance, which the other two EKU failures can never sensibly receive"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The three EKU failures are three distinct verdicts, asserted side by side.
+///
+/// Each certificate below fails a *different* clause of RFC 3161 §2.3 while satisfying the
+/// others as far as its own defect allows. Asserting them together is what shows the split
+/// is real: with one variant, every row of this test would read the same.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_the_three_eku_failures_are_distinguished() {
+    use brokkr_crypto::ffi::PathError as P;
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+
+    let cases: [(&str, P, TimestampError); 4] = [
+        ("noteku", P::TimestampingEkuAbsent, TimestampError::NotTimestampingCertificate),
+        ("noncrit", P::TimestampingEkuNotCritical, TimestampError::TimestampingEkuNotCritical),
+        ("both", P::TimestampingEkuNotExclusive, TimestampError::TimestampingEkuNotExclusive),
+        ("anyeku", P::TimestampingEkuNotExclusive, TimestampError::TimestampingEkuNotExclusive),
+    ];
+
+    let mut seen: Vec<P> = Vec::new();
+    for (name, want_path, want_ts) in cases {
+        let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
+        let got = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[]).unwrap_err();
+        assert_eq!(got, want_path, "{name}");
+        assert_eq!(path_err_to_ts(got), want_ts, "{name}");
+        seen.push(got);
+    }
+
+    // Three distinct PathError values across the four certificates — the property the split
+    // exists to provide, and the one a single variant would silently lose.
+    seen.sort_by_key(|e| format!("{e:?}"));
+    seen.dedup();
+    assert_eq!(seen.len(), 3, "three clauses must yield three distinct verdicts");
+
+    // And the conforming leaf still passes all three.
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+    brokkr_crypto::ffi::verify_cert_path(&good, &root, &[])
+        .expect("critical, exclusive timeStamping must validate");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -560,7 +677,9 @@ fn path_err_to_ts(e: brokkr_crypto::ffi::PathError) -> TimestampError {
         P::SignatureInvalid => TimestampError::SignatureInvalid,
         P::Expired => TimestampError::CertificateExpired,
         P::NotYetValid => TimestampError::CertificateNotYetValid,
-        P::NotTimestamping => TimestampError::NotTimestampingCertificate,
+        P::TimestampingEkuAbsent => TimestampError::NotTimestampingCertificate,
+        P::TimestampingEkuNotCritical => TimestampError::TimestampingEkuNotCritical,
+        P::TimestampingEkuNotExclusive => TimestampError::TimestampingEkuNotExclusive,
         P::Malformed => TimestampError::Malformed,
     }
 }
