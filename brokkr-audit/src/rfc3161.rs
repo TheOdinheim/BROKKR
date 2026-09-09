@@ -30,9 +30,11 @@
 //! them would need a third `Timestamping` variant; ARCH Rev 1.24 §6.9 records that as a DAP
 //! call rather than something this client decides.
 
-use crate::event::{TimestampAuthority, TimestampError, TimestampSigAlg, TimestampToken};
+use crate::event::{
+    SignerTrust, TimestampAuthority, TimestampError, TimestampSigAlg, TimestampToken,
+};
 use brokkr_core::crypto::Hasher;
-use brokkr_crypto::ffi::CmsError;
+use brokkr_crypto::ffi::{CmsError, PathError};
 use brokkr_crypto::{Sha384Hasher, build_request, extract_token, parse_tstinfo};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -80,23 +82,69 @@ pub struct Rfc3161Client {
     /// The authority's name as recorded on the token — the field that lets a reader tell a
     /// third-party attestation from a self-hosted one.
     authority: String,
-    /// The DER trust anchor, **supplied at construction**, never taken from a token.
-    trust_anchor_der: Vec<u8>,
+    /// How the signer is trusted — **supplied at construction**, never taken from a token.
+    trust: SignerTrust,
     timeout: Duration,
 }
 
+/// Map a path-validation failure onto the record-level error. Every variant is preserved
+/// rather than collapsed: an operator investigating "the issuer is unknown" looks at an
+/// anchor set, one investigating "the signature is wrong" looks for tampering, and one
+/// investigating "not yet valid" looks at a clock.
+fn path_to_timestamp_error(e: PathError) -> TimestampError {
+    match e {
+        PathError::UntrustedSigner => TimestampError::UntrustedSigner,
+        PathError::SignatureInvalid => TimestampError::SignatureInvalid,
+        PathError::Expired => TimestampError::CertificateExpired,
+        PathError::NotYetValid => TimestampError::CertificateNotYetValid,
+        PathError::NotTimestamping => TimestampError::NotTimestampingCertificate,
+        PathError::Malformed => TimestampError::Malformed,
+    }
+}
+
 impl Rfc3161Client {
+    /// Construct a client. `trust` selects the signer-trust mode; **`SignerTrust::
+    /// AnchorEquality` is what a deployment gets unless it asks for path validation**,
+    /// because path validation is the more permissive of the two.
     pub fn new(
         endpoint: impl Into<String>,
         authority: impl Into<String>,
-        trust_anchor_der: Vec<u8>,
+        trust: SignerTrust,
         timeout: Duration,
     ) -> Self {
         Self {
             endpoint: endpoint.into(),
             authority: authority.into(),
-            trust_anchor_der,
+            trust,
             timeout,
+        }
+    }
+
+    /// Verify the token's CMS signature and make the trust decision over the certificate
+    /// that **actually** verified it.
+    fn verify(&self, token: &[u8]) -> Result<brokkr_crypto::ffi::VerifiedCms, TimestampError> {
+        let map_cms = |e: CmsError| match e {
+            CmsError::Malformed => TimestampError::Malformed,
+            CmsError::SignatureInvalid => TimestampError::SignatureInvalid,
+        };
+        match &self.trust {
+            // Equality: unchanged from Rev 1.25 — `cms_verify` pins internally.
+            SignerTrust::AnchorEquality { anchor_der } => {
+                brokkr_crypto::ffi::cms_verify(token, anchor_der).map_err(map_cms)
+            }
+            // Path validation: verify the signature, then subject the certificate wolfSSL
+            // actually used to RFC 5280 path building against the configured root, plus the
+            // RFC 3161 timestamping-EKU requirement the Certificate Manager does not check.
+            SignerTrust::PathValidation {
+                root_der,
+                intermediates_der,
+            } => {
+                let v =
+                    brokkr_crypto::ffi::cms_verify_unpinned(token, root_der).map_err(map_cms)?;
+                brokkr_crypto::ffi::verify_cert_path(&v.used_cert, root_der, intermediates_der)
+                    .map_err(path_to_timestamp_error)?;
+                Ok(v)
+            }
         }
     }
 
@@ -166,14 +214,9 @@ impl TimestampAuthority for Rfc3161Client {
         // come out of the response envelope before wolfSSL can verify it.
         let token = extract_token(&response).map_err(|_| TimestampError::Malformed)?;
 
-        // Verify the CMS signature against the pre-configured anchor. Malformed and
-        // SignatureInvalid are kept apart here because they are different events.
-        let verified = brokkr_crypto::ffi::cms_verify(&token, &self.trust_anchor_der).map_err(
-            |e| match e {
-                CmsError::Malformed => TimestampError::Malformed,
-                CmsError::SignatureInvalid => TimestampError::SignatureInvalid,
-            },
-        )?;
+        // Verify the CMS signature and make the configured trust decision. Every failure
+        // mode is kept apart here because they are different investigations.
+        let verified = self.verify(&token)?;
 
         // Read the TSTInfo from the now-authenticated eContent.
         let tst = parse_tstinfo(&verified.content).map_err(|_| TimestampError::Malformed)?;

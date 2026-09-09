@@ -53,7 +53,8 @@ pub mod saga;
 pub use event::{
     AuditEvent, AuditRecord, AuthorizationOutcome, AuthorizationRecord, BarrierCrossing,
     CryptoGeneration, ErasureTombstone, GenerationSignature, GenomePromotion, ProposalRecord,
-    RecordedInput, TimestampAuthority, TimestampError, TimestampSigAlg, TimestampToken,
+    RecordedInput, SignerTrust, TimestampAuthority, TimestampError, TimestampSigAlg,
+    TimestampToken,
     Timestamping,
 };
 pub use rfc3161::Rfc3161Client;

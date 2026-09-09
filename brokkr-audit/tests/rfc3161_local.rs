@@ -240,3 +240,394 @@ fn test_a3_absent_authority_still_records() {
     };
     assert!(matches!(t, brokkr_audit::Timestamping::Unavailable { .. }));
 }
+
+// =========================================================================================
+// Certificate path validation (OQGF-A-3; ARCH Rev 1.26 §6.9)
+// =========================================================================================
+//
+// Rev 1.25 pinned the signer to a configured anchor by byte-equality, which is correct when
+// the authority's signing certificate IS the anchor — a self-signed TSA, which is every
+// responder above. **It admits no CA-issued authority, which is every public TSA**, so
+// OQGF-A-3's independence clause was unreachable in practice.
+//
+// These tests build a real CA and issue leaves under it with **controlled validity windows**
+// via `openssl ca -startdate/-enddate`. That matters: an earlier attempt used
+// `openssl x509 -req`, which has no such flags on this host's OpenSSL 3.0.13, and `faketime`
+// is not installed — so three error mappings had to be recorded as "read in a header, not
+// observed". `openssl ca` closes that gap, and each mapping below is now asserted against a
+// certificate that actually exhibits the condition.
+
+/// Build a throwaway CA plus a set of leaves exercising every path-validation outcome.
+/// Returns the directory; DER files are `ca.der`, `good.der`, `noteku.der`, `expired.der`,
+/// `future.der`, `other.der`.
+fn ca_dir() -> PathBuf {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("brokkr-a3-ca-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("db")).expect("temp dir");
+    std::fs::write(dir.join("db/index.txt"), "").expect("index");
+    std::fs::write(dir.join("db/serial"), "01\n").expect("serial");
+    std::fs::write(
+        dir.join("ca.cnf"),
+        "[ ca ]\ndefault_ca = CA_default\n[ CA_default ]\ndir = .\n\
+         database = ./db/index.txt\nnew_certs_dir = ./db\nserial = ./db/serial\n\
+         certificate = ./ca.crt\nprivate_key = ./ca.key\ndefault_md = sha256\n\
+         policy = pol\nemail_in_dn = no\nrand_serial = no\nunique_subject = no\n\
+         [ pol ]\ncommonName = supplied\n\
+         [ tsa_ext ]\nextendedKeyUsage = critical,timeStamping\n\
+         basicConstraints = critical,CA:FALSE\n\
+         [ noteku_ext ]\nextendedKeyUsage = critical,clientAuth\n\
+         basicConstraints = critical,CA:FALSE\n",
+    )
+    .expect("ca.cnf");
+
+    let run = |args: &[&str]| {
+        let out = Command::new("openssl")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("openssl");
+        assert!(
+            out.status.success(),
+            "openssl {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let der = |name: &str| {
+        run(&[
+            "x509",
+            "-in",
+            &format!("{name}.crt"),
+            "-outform",
+            "DER",
+            "-out",
+            &format!("{name}.der"),
+        ]);
+    };
+
+    // The root, and an UNRELATED root for the untrusted-signer case.
+    for (name, cn) in [("ca", "BROKKR Test Root"), ("other", "Unrelated Root")] {
+        run(&[
+            "req", "-x509", "-newkey", "rsa:2048", "-keyout",
+            &format!("{name}.key"), "-out", &format!("{name}.crt"), "-days", "3", "-nodes",
+            "-subj", &format!("/CN={cn}"), "-addext", "basicConstraints=critical,CA:TRUE",
+        ]);
+        der(name);
+    }
+
+    // Leaves. `-startdate`/`-enddate` are what make the expired and not-yet-valid cases
+    // observable; without them those two mappings could only be read out of a header.
+    let leaves: [(&str, &str, &str, &str); 4] = [
+        ("good", "tsa_ext", "20250101000000Z", "20350101000000Z"),
+        ("noteku", "noteku_ext", "20250101000000Z", "20350101000000Z"),
+        ("expired", "tsa_ext", "20200101000000Z", "20200201000000Z"),
+        ("future", "tsa_ext", "20300101000000Z", "20310101000000Z"),
+    ];
+    for (name, ext, start, end) in leaves {
+        run(&[
+            "req", "-newkey", "rsa:2048", "-keyout", &format!("{name}.key"),
+            "-out", &format!("{name}.csr"), "-nodes", "-subj",
+            &format!("/CN=BROKKR {name}"),
+        ]);
+        run(&[
+            "ca", "-batch", "-config", "ca.cnf", "-in", &format!("{name}.csr"),
+            "-out", &format!("{name}.crt"), "-extfile", "ca.cnf", "-extensions", ext,
+            "-startdate", start, "-enddate", end, "-notext",
+        ]);
+        der(name);
+    }
+    dir
+}
+
+/// A CA-issued signer with the timestamping EKU validates against the configured root.
+///
+/// **This is the case anchor equality cannot express**: the signer is not the anchor, so
+/// byte-equality would reject it. Every public TSA is shaped this way.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_path_validation_accepts_a_ca_issued_signer() {
+    let dir = ca_dir();
+    let leaf = std::fs::read(dir.join("good.der")).expect("leaf");
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+
+    brokkr_crypto::ffi::verify_cert_path(&leaf, &root, &[])
+        .expect("a CA-issued timestamping certificate must validate against its own root");
+
+    // And anchor equality — the default, stricter mode — rejects the same certificate,
+    // which is exactly why path validation must be asked for rather than upgraded into.
+    assert_ne!(leaf, root, "the signer is not the anchor in this shape");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An unrelated root reports `UntrustedSigner`, **not** `SignatureInvalid`.
+///
+/// The distinction is the whole reason the variant exists: "the issuer is unknown" sends an
+/// operator to an anchor set that has drifted from an authority that rotated CAs; "the
+/// signature is wrong" sends them hunting an attacker. Observed as wolfSSL `-188`.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_unrelated_root_reports_untrusted_signer_not_signature_invalid() {
+    let dir = ca_dir();
+    let leaf = std::fs::read(dir.join("good.der")).expect("leaf");
+    let other = std::fs::read(dir.join("other.der")).expect("other root");
+
+    let e = brokkr_crypto::ffi::verify_cert_path(&leaf, &other, &[])
+        .expect_err("a leaf must not validate against a root that did not issue it");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::UntrustedSigner);
+    assert_ne!(
+        e,
+        brokkr_crypto::ffi::PathError::SignatureInvalid,
+        "an unknown issuer is not a signature failure; conflating them points an \
+         investigation at the one thing that is not wrong"
+    );
+    assert_eq!(
+        path_err_to_ts(e),
+        TimestampError::UntrustedSigner,
+        "and the distinction must survive the mapping into the record-level error"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A certificate that chains correctly but lacks `id-kp-timeStamping` is refused.
+///
+/// `wolfSSL_CertManagerVerifyBuffer` **passes** this certificate — path validation does not
+/// enforce application EKU policy — so nothing checks RFC 3161's requirement unless the
+/// client does. Without this check a CA-issued TLS client certificate could stamp BROKKR's
+/// audit chain.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_signer_without_timestamping_eku_is_refused() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    let noteku = std::fs::read(dir.join("noteku.der")).expect("noteku");
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+
+    // The EKU accessor sees the difference...
+    assert!(
+        brokkr_crypto::ffi::cert_has_timestamping_eku(&good).expect("parse good"),
+        "the timestamping leaf must carry the EKU"
+    );
+    assert!(
+        !brokkr_crypto::ffi::cert_has_timestamping_eku(&noteku).expect("parse noteku"),
+        "the clientAuth leaf must not"
+    );
+
+    // ...and the full check refuses it even though the chain is sound.
+    let e = brokkr_crypto::ffi::verify_cert_path(&noteku, &root, &[])
+        .expect_err("a non-timestamping certificate must not be accepted as a TSA signer");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::NotTimestamping);
+    assert_eq!(
+        path_err_to_ts(e),
+        TimestampError::NotTimestampingCertificate
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Expired and not-yet-valid signers are reported as themselves.
+///
+/// **These two mappings were "header only" until this test.** `openssl ca -startdate/
+/// -enddate` produces certificates that genuinely exhibit each condition, so `-151` and
+/// `-150` are now observed rather than transcribed. `NotYetValid` keeps its own word because
+/// in a component whose purpose is attesting time, a local clock error is its own finding.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_expired_and_not_yet_valid_signers_are_named_distinctly() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+
+    let expired = std::fs::read(dir.join("expired.der")).expect("expired");
+    let e = brokkr_crypto::ffi::verify_cert_path(&expired, &root, &[])
+        .expect_err("an expired signer must not validate");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::Expired);
+    assert_eq!(path_err_to_ts(e), TimestampError::CertificateExpired);
+
+    let future = std::fs::read(dir.join("future.der")).expect("future");
+    let e = brokkr_crypto::ffi::verify_cert_path(&future, &root, &[])
+        .expect_err("a not-yet-valid signer must not validate");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::NotYetValid);
+    assert_eq!(path_err_to_ts(e), TimestampError::CertificateNotYetValid);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// **Anchor equality is unchanged**, and remains what a deployment gets without asking.
+///
+/// Rev 1.26 adds a *more permissive* check — path validation trusts a CA's issuance policy
+/// rather than one certificate — so it must never be acquired by upgrading. A configuration
+/// that selects neither still gets equality.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_anchor_equality_is_unchanged_and_is_not_upgraded() {
+    let dir = tsa_dir();
+    let other = tsa_dir();
+
+    let digest = Sha384Hasher.hash(b"a record");
+    let resp = respond(&dir, &build_request(&digest.bytes));
+    let token = extract_token(&resp).expect("extract");
+    let anchor = std::fs::read(dir.join("tsa.crt.der")).expect("anchor");
+    let wrong = std::fs::read(other.join("tsa.crt.der")).expect("wrong anchor");
+
+    // The self-signed responder verifies under equality, exactly as at Rev 1.25.
+    brokkr_crypto::ffi::cms_verify(&token, &anchor)
+        .expect("the self-signed TSA is its own anchor");
+
+    // An unrelated anchor is still rejected under equality — no fallback to a chain search.
+    assert!(
+        brokkr_crypto::ffi::cms_verify(&token, &wrong).is_err(),
+        "equality must not silently widen into a chain search when the anchor does not match"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+/// The record-level mapping, mirroring `rfc3161::path_to_timestamp_error`, so these tests
+/// assert the distinction that reaches an operator rather than only the FFI code.
+fn path_err_to_ts(e: brokkr_crypto::ffi::PathError) -> TimestampError {
+    use brokkr_crypto::ffi::PathError as P;
+    match e {
+        P::UntrustedSigner => TimestampError::UntrustedSigner,
+        P::SignatureInvalid => TimestampError::SignatureInvalid,
+        P::Expired => TimestampError::CertificateExpired,
+        P::NotYetValid => TimestampError::CertificateNotYetValid,
+        P::NotTimestamping => TimestampError::NotTimestampingCertificate,
+        P::Malformed => TimestampError::Malformed,
+    }
+}
+
+/// **End to end through `TimestampAuthority::stamp` with a CA-issued authority.**
+///
+/// The tests above exercise path validation at the FFI layer over certificates on disk.
+/// This one drives the whole client — request, HTTP, CMS verification, path validation, EKU
+/// policy, imprint binding — against a responder whose signing certificate is *issued by* a
+/// CA rather than being the anchor. It is the shape Rev 1.25 could not accept at all, and
+/// the reason a six-line dispatch in `Rfc3161Client::verify` is worth a listener.
+#[test]
+#[ignore = "live: needs openssl(1), binds a loopback port, writes to a temp dir"]
+fn test_a3_stamp_end_to_end_with_a_ca_issued_authority() {
+    use std::io::{Read as _, Write as _};
+
+    let dir = ca_dir();
+    let d = dir.display();
+    // A TSA config whose signer is the CA-issued `good` leaf, not a self-signed cert.
+    std::fs::write(
+        dir.join("openssl.cnf"),
+        format!(
+            "[ tsa ]\ndefault_tsa = t\n[ t ]\ndir = {d}\nserial = {d}/tsserial\n\
+             crypto_device = builtin\nsigner_cert = {d}/good.crt\ncerts = {d}/good.crt\n\
+             signer_key = {d}/good.key\nsigner_digest = sha256\ndefault_policy = 1.2.3.4.1\n\
+             digests = sha256, sha384, sha512\naccuracy = secs:1\nordering = yes\n\
+             tsa_name = yes\ness_cert_id_chain = no\ness_cert_id_alg = sha256\n"
+        ),
+    )
+    .expect("cnf");
+    std::fs::write(dir.join("tsserial"), "01\n").expect("serial");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let serve_dir = dir.clone();
+    let server = std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().expect("accept");
+        // Read headers, then exactly Content-Length bytes. Bounded, like the client.
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let body = loop {
+            let n = sock.read(&mut buf).expect("read");
+            if n == 0 {
+                break Vec::new();
+            }
+            raw.extend_from_slice(&buf[..n]);
+            if let Some(sep) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&raw[..sep]).to_lowercase();
+                let len: usize = head
+                    .split("content-length:")
+                    .nth(1)
+                    .and_then(|s| s.split("\r\n").next())
+                    .and_then(|s| s.trim().parse().ok())
+                    .expect("content-length");
+                let start = sep + 4;
+                while raw.len() < start + len {
+                    let n = sock.read(&mut buf).expect("read body");
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buf[..n]);
+                }
+                break raw[start..start + len].to_vec();
+            }
+        };
+        let resp = respond(&serve_dir, &body);
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/timestamp-reply\r\n\
+Content-Length: {}\r\nConnection: close\r\n\r\n",
+            resp.len()
+        );
+        sock.write_all(head.as_bytes()).expect("write head");
+        sock.write_all(&resp).expect("write body");
+    });
+
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    let client = brokkr_audit::Rfc3161Client::new(
+        addr.to_string(),
+        "test-ca-issued-tsa (self-hosted: not independent evidence)",
+        brokkr_audit::SignerTrust::PathValidation {
+            root_der: root,
+            intermediates_der: Vec::new(),
+        },
+        std::time::Duration::from_secs(10),
+    );
+
+    let signed = b"a record's signed content";
+    let token = brokkr_audit::TimestampAuthority::stamp(&client, signed)
+        .expect("a CA-issued authority must be accepted under path validation");
+
+    server.join().expect("server thread");
+
+    assert!(!token.gen_time.is_empty(), "genTime must be recorded");
+    assert!(
+        !token.algorithm.is_post_quantum(),
+        "no RFC 3161 authority signs post-quantum; A-3's PQC clause stays PARTIAL"
+    );
+    assert_ne!(token.key_oid, 0, "the signer key OID must be observed");
+    assert_ne!(token.hash_oid, 0, "the digest OID must be observed");
+
+    // And the same client shape under an UNRELATED root fails as UntrustedSigner rather
+    // than as a signature failure — the distinction surviving all the way to a caller.
+    let other = std::fs::read(dir.join("other.der")).expect("other root");
+    let leaf = std::fs::read(dir.join("good.der")).expect("leaf");
+    assert_eq!(
+        brokkr_crypto::ffi::verify_cert_path(&leaf, &other, &[]),
+        Err(brokkr_crypto::ffi::PathError::UntrustedSigner)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A **self-signed** certificate that is not an anchor is refused as `UntrustedSigner`.
+///
+/// The Rev 1.26 table anticipated `ASN_SELF_SIGNED_E` (−275) here. **The observed code is
+/// `ASN_NO_SIGNER_E` (−188)** — wolfSSL reports "no signer" before it reaches a self-signed
+/// determination on this path. The mapping is unaffected because both codes map to
+/// `UntrustedSigner`, but the distinction is recorded rather than smoothed: −275 was **read
+/// in a header and not observed**, and this file does not claim otherwise.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_self_signed_non_anchor_is_untrusted_signer() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    // `other.der` is self-signed and is NOT the configured anchor.
+    let self_signed = std::fs::read(dir.join("other.der")).expect("other");
+
+    assert_eq!(
+        brokkr_crypto::ffi::verify_cert_path(&self_signed, &root, &[]),
+        Err(brokkr_crypto::ffi::PathError::UntrustedSigner),
+        "a self-signed certificate that is not the anchor must not validate, and must be \
+         reported as an unknown issuer rather than a signature failure"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

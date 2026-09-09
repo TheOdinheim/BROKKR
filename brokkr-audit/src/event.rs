@@ -306,6 +306,58 @@ pub enum TimestampError {
     /// BROKKR sent — a substituted response, or an authority stamping other bytes.
     /// **The one variant here that is an attack signature.**
     ImprintMismatch,
+    /// The signer certificate chains to **no configured anchor** (ARCH Rev 1.26).
+    ///
+    /// **Deliberately distinct from `SignatureInvalid`, and the distinction is the point:**
+    /// "the signature is wrong" sends an operator looking for tampering, while "the issuer
+    /// is unknown" sends them to an anchor set that has drifted from an authority that
+    /// rotated CAs. Collapsing them would point the investigation at the one thing that is
+    /// not wrong — the category error `ResolveError::{Expired, ReplayedNonce}` corrected at
+    /// Rev 1.13, and this enum corrected at Rev 1.24.
+    UntrustedSigner,
+    /// The signer certificate has expired. Routine operational drift: the authority must
+    /// renew, or the configured anchor is stale.
+    CertificateExpired,
+    /// The signer certificate is not yet valid — usually a local clock problem, which in a
+    /// component whose whole purpose is attesting time deserves its own word.
+    CertificateNotYetValid,
+    /// The signer certificate does not carry `id-kp-timeStamping`. RFC 3161 requires it;
+    /// `wolfSSL_CertManagerVerifyBuffer` performs path validation and does **not** enforce
+    /// application EKU policy, so nothing checks it unless the client does.
+    NotTimestampingCertificate,
+}
+
+/// How the token's signer certificate is trusted (OQGF-A-3; ARCH Rev 1.26 §6.9).
+///
+/// **`AnchorEquality` is the default, and the direction of that choice is the point.**
+/// Path validation is the *more permissive* check — it trusts a CA's issuance policy rather
+/// than one certificate — so **a deployment must ask for it and must never acquire it by
+/// upgrading.** Anchor equality also preserves Rev 1.25's behaviour exactly for anything
+/// already configured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignerTrust {
+    /// The signer certificate must **equal** the configured anchor. Stricter: it admits
+    /// exactly one certificate. Correct where the signer *is* the anchor — a self-signed
+    /// TSA, which is the local `openssl ts` responder.
+    AnchorEquality { anchor_der: Vec<u8> },
+    /// The signer certificate must chain to `root_der` under RFC 5280 through
+    /// `intermediates_der` in root-first order, and must carry the timestamping EKU.
+    /// **Required for any CA-issued authority — which is every public TSA.**
+    PathValidation {
+        root_der: Vec<u8>,
+        intermediates_der: Vec<Vec<u8>>,
+    },
+}
+
+impl SignerTrust {
+    /// The trust anchor bytes a caller supplies to CMS verification. Both modes need the
+    /// root: anchor equality compares against it, path validation chains to it.
+    pub fn anchor(&self) -> &[u8] {
+        match self {
+            SignerTrust::AnchorEquality { anchor_der } => anchor_der,
+            SignerTrust::PathValidation { root_der, .. } => root_der,
+        }
+    }
 }
 
 impl core::fmt::Display for TimestampError {
@@ -321,6 +373,18 @@ impl core::fmt::Display for TimestampError {
             TimestampError::ImprintMismatch => {
                 f.write_str("timestamp token attests a different message imprint than was sent")
             }
+            TimestampError::UntrustedSigner => {
+                f.write_str("timestamp signer certificate chains to no configured anchor")
+            }
+            TimestampError::CertificateExpired => {
+                f.write_str("timestamp signer certificate has expired")
+            }
+            TimestampError::CertificateNotYetValid => {
+                f.write_str("timestamp signer certificate is not yet valid")
+            }
+            TimestampError::NotTimestampingCertificate => f.write_str(
+                "timestamp signer certificate lacks the id-kp-timeStamping extended key usage",
+            ),
         }
     }
 }
