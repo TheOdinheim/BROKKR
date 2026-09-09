@@ -258,8 +258,8 @@ fn test_a3_absent_authority_still_records() {
 // certificate that actually exhibits the condition.
 
 /// Build a throwaway CA plus a set of leaves exercising every path-validation outcome.
-/// Returns the directory; DER files are `ca.der`, `good.der`, `noteku.der`, `expired.der`,
-/// `future.der`, `other.der`.
+/// Returns the directory; DER files are `ca.der`, `good.der`, `noteku.der`, `noncrit.der`,
+/// `expired.der`, `future.der`, `other.der`.
 fn ca_dir() -> PathBuf {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -276,6 +276,8 @@ fn ca_dir() -> PathBuf {
          policy = pol\nemail_in_dn = no\nrand_serial = no\nunique_subject = no\n\
          [ pol ]\ncommonName = supplied\n\
          [ tsa_ext ]\nextendedKeyUsage = critical,timeStamping\n\
+         basicConstraints = critical,CA:FALSE\n\
+         [ tsa_noncrit_ext ]\nextendedKeyUsage = timeStamping\n\
          basicConstraints = critical,CA:FALSE\n\
          [ noteku_ext ]\nextendedKeyUsage = critical,clientAuth\n\
          basicConstraints = critical,CA:FALSE\n",
@@ -318,9 +320,12 @@ fn ca_dir() -> PathBuf {
 
     // Leaves. `-startdate`/`-enddate` are what make the expired and not-yet-valid cases
     // observable; without them those two mappings could only be read out of a header.
-    let leaves: [(&str, &str, &str, &str); 4] = [
+    let leaves: [(&str, &str, &str, &str); 5] = [
         ("good", "tsa_ext", "20250101000000Z", "20350101000000Z"),
         ("noteku", "noteku_ext", "20250101000000Z", "20350101000000Z"),
+        // Carries id-kp-timeStamping, but NOT critical. RFC 3161 §2.3 refuses it, and it is
+        // the case that passed every check through ARCH Rev 1.26.
+        ("noncrit", "tsa_noncrit_ext", "20250101000000Z", "20350101000000Z"),
         ("expired", "tsa_ext", "20200101000000Z", "20200201000000Z"),
         ("future", "tsa_ext", "20300101000000Z", "20310101000000Z"),
     ];
@@ -407,11 +412,15 @@ fn test_a3_signer_without_timestamping_eku_is_refused() {
 
     // The EKU accessor sees the difference...
     assert!(
-        brokkr_crypto::ffi::cert_has_timestamping_eku(&good).expect("parse good"),
+        brokkr_crypto::ffi::cert_timestamping_eku(&good)
+            .expect("parse good")
+            .present,
         "the timestamping leaf must carry the EKU"
     );
     assert!(
-        !brokkr_crypto::ffi::cert_has_timestamping_eku(&noteku).expect("parse noteku"),
+        !brokkr_crypto::ffi::cert_timestamping_eku(&noteku)
+            .expect("parse noteku")
+            .present,
         "the clientAuth leaf must not"
     );
 
@@ -422,6 +431,63 @@ fn test_a3_signer_without_timestamping_eku_is_refused() {
     assert_eq!(
         path_err_to_ts(e),
         TimestampError::NotTimestampingCertificate
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A signer carrying `id-kp-timeStamping` **non-critically** is refused.
+///
+/// RFC 3161 §2.3: "This extension MUST be critical." The requirement is not decoration — a
+/// non-critical extension MAY be ignored by a verifier that does not understand it, so a
+/// certificate claiming timestamping non-critically permits exactly the reading the
+/// restriction exists to forbid.
+///
+/// **This certificate passed every check through ARCH Rev 1.26**, which read only
+/// `extExtKeyUsage` and never the criticality bit — the placed clause was half-implemented.
+/// The two facts are asserted separately here so the test shows *why* it is refused: the
+/// EKU is present, and it is the criticality that fails. A test asserting only the verdict
+/// would pass just as well against a certificate that lacked the EKU entirely.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_non_critical_timestamping_eku_is_refused() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+    let noncrit = std::fs::read(dir.join("noncrit.der")).expect("noncrit");
+
+    // The conforming leaf: present AND critical (observed `extExtKeyUsage = 0x20`,
+    // `extExtKeyUsageCrit = 1`).
+    let g = brokkr_crypto::ffi::cert_timestamping_eku(&good).expect("parse good");
+    assert!(g.present, "the conforming leaf carries the EKU");
+    assert!(g.critical, "and carries it critically");
+    assert!(g.satisfies_rfc3161());
+    brokkr_crypto::ffi::verify_cert_path(&good, &root, &[])
+        .expect("a critical timestamping EKU must validate");
+
+    // The non-conforming leaf: present, NOT critical (observed `0x20` / `0`). Presence
+    // alone — the pre-Rev-1.26-implementation check — would have accepted it.
+    let n = brokkr_crypto::ffi::cert_timestamping_eku(&noncrit).expect("parse noncrit");
+    assert!(
+        n.present,
+        "the non-critical leaf does carry id-kp-timeStamping — that is what makes it the \
+         interesting case rather than a duplicate of the missing-EKU test"
+    );
+    assert!(!n.critical, "but the extension is not marked critical");
+    assert!(
+        !n.satisfies_rfc3161(),
+        "presence without criticality does not satisfy RFC 3161 §2.3"
+    );
+
+    // ...and the full check refuses it, even though the chain is sound and the EKU is there.
+    let e = brokkr_crypto::ffi::verify_cert_path(&noncrit, &root, &[])
+        .expect_err("a non-critical timestamping EKU must not be accepted as a TSA signer");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::NotTimestamping);
+    assert_eq!(
+        path_err_to_ts(e),
+        TimestampError::NotTimestampingCertificate,
+        "the placed design assigns one variant to both EKU failures; if that distinction \
+         is ever split, this assertion is where it surfaces"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

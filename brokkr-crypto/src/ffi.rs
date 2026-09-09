@@ -250,6 +250,7 @@ unsafe extern "C" {
     -> c_int;
     fn wc_FreeDecodedCert(cert: *mut c_void);
     fn brokkr_cert_ext_key_usage(dc: *const c_void) -> Word32;
+    fn brokkr_cert_ext_key_usage_crit(dc: *const c_void) -> Word32;
     fn brokkr_extkeyuse_timestamp() -> Word32;
     fn brokkr_decoded_cert_sizeof() -> Word32;
 }
@@ -1055,8 +1056,17 @@ pub enum PathError {
     /// `ASN_BEFORE_DATE_E` (−150): the certificate is not yet valid — usually a local clock
     /// problem, which in a component whose purpose is attesting time deserves its own word.
     NotYetValid,
-    /// The leaf does not carry `id-kp-timeStamping`. Not a wolfSSL code: policy RFC 3161
-    /// requires and `CertManagerVerifyBuffer` does not enforce.
+    /// The leaf does not satisfy RFC 3161 §2.3's extended-key-usage requirement: either it
+    /// does not carry `id-kp-timeStamping`, or it carries it **non-critically**. Not a
+    /// wolfSSL code: policy RFC 3161 requires and `CertManagerVerifyBuffer` does not
+    /// enforce.
+    ///
+    /// **One variant covers both conditions**, which is what the placed design assigns
+    /// (ARCH Rev 1.26 §6.9 names no second variant). The two are arguably different
+    /// investigations — a missing EKU means the wrong certificate is configured, while a
+    /// non-critical one means the *right* authority was issued a non-conformant
+    /// certificate — but splitting them is a type change the DAP places, not one the
+    /// builder invents.
     NotTimestamping,
     /// An anchor could not be loaded, or the certificate did not parse.
     Malformed,
@@ -1085,7 +1095,8 @@ fn path_error_from(rc: c_int) -> PathError {
 }
 
 /// Validate `leaf_der` against `root_der` plus `intermediates_der` (root-first trust order)
-/// under RFC 5280, then require the leaf to carry `id-kp-timeStamping`.
+/// under RFC 5280, then require the leaf to carry `id-kp-timeStamping` **as a critical
+/// extension** (RFC 3161 §2.3).
 ///
 /// **What this proves:** the leaf chains to an anchor this deployment configured, and is
 /// authorized to timestamp. **What it does not:** that the authority's clock is right, or
@@ -1136,17 +1147,47 @@ pub fn verify_cert_path(
     }
 
     // RFC 3161 policy, checked separately because the CertManager does not enforce it.
-    if !cert_has_timestamping_eku(leaf_der)? {
+    // Both conjuncts: present AND critical (§2.3). A leaf claiming timestamping
+    // non-critically is refused — see `TimestampingEku`.
+    if !cert_timestamping_eku(leaf_der)?.satisfies_rfc3161() {
         return Err(PathError::NotTimestamping);
     }
     Ok(())
 }
 
-/// Whether `cert_der` carries `id-kp-timeStamping` (`EXTKEYUSE_TIMESTAMP`).
+/// What a certificate's extended-key-usage extension says about timestamping.
+///
+/// Two facts, not one, because RFC 3161 §2.3 requires **both** and they fail for different
+/// reasons: a certificate may carry `id-kp-timeStamping` and still be unusable as a TSA
+/// signer because the extension is not marked critical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimestampingEku {
+    /// The extension carries `id-kp-timeStamping` (`EXTKEYUSE_TIMESTAMP`).
+    pub present: bool,
+    /// The extension is marked **critical**. RFC 3161 §2.3: "This extension MUST be
+    /// critical." A non-critical extension MAY be ignored by a verifier that does not
+    /// understand it, so claiming timestamping non-critically permits precisely the
+    /// reading the restriction exists to forbid.
+    pub critical: bool,
+}
+
+impl TimestampingEku {
+    /// Whether this certificate satisfies RFC 3161 §2.3 — present **and** critical.
+    ///
+    /// Both conjuncts, deliberately: `present` alone was the check through ARCH Rev 1.26,
+    /// which left the placed criticality clause half-implemented and admitted a leaf
+    /// carrying a non-critical timestamping EKU (observed: `extExtKeyUsage = 0x20`,
+    /// `extExtKeyUsageCrit = 0`).
+    pub fn satisfies_rfc3161(&self) -> bool {
+        self.present && self.critical
+    }
+}
+
+/// Read `cert_der`'s timestamping extended-key-usage state — presence and criticality.
 ///
 /// Parsed with `NO_VERIFY`: the chain decision is the Certificate Manager's and has already
-/// been made. This reads one byte.
-pub fn cert_has_timestamping_eku(cert_der: &[u8]) -> Result<bool, PathError> {
+/// been made. This reads two bits, in one parse.
+pub fn cert_timestamping_eku(cert_der: &[u8]) -> Result<TimestampingEku, PathError> {
     // SAFETY: brokkr_decoded_cert_sizeof is a pure `sizeof` in the shim.
     let size = unsafe { brokkr_decoded_cert_sizeof() } as usize;
     if size == 0 {
@@ -1166,8 +1207,12 @@ pub fn cert_has_timestamping_eku(cert_der: &[u8]) -> Result<bool, PathError> {
             return Err(PathError::Malformed);
         }
         let eku = brokkr_cert_ext_key_usage(p);
+        let crit = brokkr_cert_ext_key_usage_crit(p);
         let timestamp_bit = brokkr_extkeyuse_timestamp();
         wc_FreeDecodedCert(p);
-        Ok(eku & timestamp_bit != 0)
+        Ok(TimestampingEku {
+            present: eku & timestamp_bit != 0,
+            critical: crit != 0,
+        })
     }
 }

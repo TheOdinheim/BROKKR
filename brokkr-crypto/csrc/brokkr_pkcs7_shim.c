@@ -100,6 +100,23 @@ unsigned int brokkr_cert_ext_key_usage(const DecodedCert *dc) {
     return (unsigned int)dc->extExtKeyUsage;
 }
 
+/* Whether that extended-key-usage extension is marked CRITICAL. RFC 3161 §2.3 requires it,
+ * and the requirement is not decoration: a non-critical extension MAY be ignored by a
+ * verifier that does not understand it, so a certificate claiming timestamping
+ * non-critically permits exactly the reading the restriction exists to forbid. Presence
+ * without criticality is therefore a refusal, not a lesser pass.
+ *
+ * `extExtKeyUsageCrit` is a WC_BITFIELD (asn.h:2122) and bitfields BEFORE it sit behind
+ * #ifdefs (WOLFSSL_ASN_CA_ISSUER, WOLFSSL_AKID_NAME, the name-constraint flags), so its bit
+ * position is build-flag dependent. Rust cannot compute a bitfield offset at all; the shim
+ * is told it by the compiler. Returns 0 — the refusing value — for a NULL handle. */
+unsigned int brokkr_cert_ext_key_usage_crit(const DecodedCert *dc) {
+    if (dc == 0) {
+        return 0;
+    }
+    return (unsigned int)dc->extExtKeyUsageCrit;
+}
+
 /* The EXTKEYUSE_TIMESTAMP bit, so Rust does not hard-code a constant that belongs to the
  * library. */
 unsigned int brokkr_extkeyuse_timestamp(void) {
