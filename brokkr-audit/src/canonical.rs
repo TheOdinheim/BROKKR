@@ -103,6 +103,7 @@ fn sigalg_tag(s: SignatureAlg) -> u8 {
         SignatureAlg::SlhDsaShake256s => 9,
         SignatureAlg::EcdsaP256 => 10,
         SignatureAlg::EcdsaP384 => 11,
+        SignatureAlg::RsaPkcs1Sha256 => 12,
     }
 }
 

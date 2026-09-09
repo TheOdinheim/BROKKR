@@ -22,6 +22,22 @@ pub enum SignatureAlg {
     SlhDsaShake256s,
     EcdsaP256,
     EcdsaP384,
+    /// RSASSA-PKCS#1 v1.5 with SHA-256. **The only classical, non-elliptic signature
+    /// algorithm BROKKR names**, and it exists for one reason: an RFC 3161 timestamp
+    /// authority signs its tokens RSA or ECDSA, and OQGF-G-1 requires the CBOM to list
+    /// every cryptographic primitive the system **uses** — verifying a token is a use
+    /// (ARCH Rev 1.25 §6.9, "the CBOM consequence").
+    ///
+    /// Its presence in a CBOM is what lets promotion-gate predicate 3 (§6.2) **refuse**
+    /// this path: a genome whose `policy.disallowed` contains this variant cannot be
+    /// promoted while its CBOM declares an RSA-verifying timestamp path. That is a
+    /// control a High-Assurance deployment can use to decline a classical signature in
+    /// its audit chain, not a side effect of naming the algorithm.
+    ///
+    /// **Naming it is not endorsing it.** It is never used to *produce* a BROKKR
+    /// signature — `DualKeyPair` signs ML-DSA + SLH-DSA and nothing else — and it is
+    /// quantum-vulnerable.
+    RsaPkcs1Sha256,
 }
 
 /// Hash algorithm identifier.
