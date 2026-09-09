@@ -610,6 +610,56 @@ fn test_a3_the_three_eku_failures_are_distinguished() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A leaf that chains to the correct anchor but whose **signature is corrupted** reports
+/// `SignatureInvalid`, observed as wolfSSL `-155` (`ASN_SIG_CONFIRM_E`).
+///
+/// **This mapping was "header only" until this test**, and it was the last one. ARCH Rev 1.26
+/// recorded three date/signature constants as read from `error-crypt.h` rather than observed;
+/// Rev 1.27 closed two of them and left this one open, noting that a source comment claimed
+/// it was observed while **no committed test drove a certificate to `-155`** — the
+/// untrusted-signer test asserts only that the error is *not* `SignatureInvalid`, which is a
+/// negative assertion. Under CLAUDE.md §7 the builder's own summary is not evidence. This is.
+///
+/// The corruption is the **last byte of the DER**, which is the final byte of the
+/// `signatureValue` BIT STRING. That placement matters: flipping a byte inside
+/// `tbsCertificate` instead yields `-140`, a parse-level error, because it corrupts the
+/// structure before the signature is ever checked. Only a flip within `signatureValue`
+/// leaves a well-formed certificate whose signature does not verify — which is the condition
+/// this mapping is *for*.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_corrupted_signature_reports_signature_invalid() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+
+    // Control: the pristine leaf validates, so the only difference below is the flipped byte.
+    brokkr_crypto::ffi::verify_cert_path(&good, &root, &[])
+        .expect("the pristine leaf must validate against its own root");
+
+    let mut tampered = good.clone();
+    let last = tampered.len() - 1;
+    tampered[last] ^= 0xFF;
+
+    let e = brokkr_crypto::ffi::verify_cert_path(&tampered, &root, &[])
+        .expect_err("a leaf whose signature does not verify must be refused");
+    assert_eq!(
+        e,
+        brokkr_crypto::ffi::PathError::SignatureInvalid,
+        "a corrupted signature is a signature failure, not an unknown issuer: the leaf still \
+         names the same issuer and still chains to the configured anchor"
+    );
+    assert_ne!(
+        e,
+        brokkr_crypto::ffi::PathError::UntrustedSigner,
+        "reporting this as UntrustedSigner would send an operator to fix an anchor set that \
+         is correct — the Rev 1.26 distinction, asserted here from the other direction"
+    );
+    assert_eq!(path_err_to_ts(e), TimestampError::SignatureInvalid);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Expired and not-yet-valid signers are reported as themselves.
 ///
 /// **These two mappings were "header only" until this test.** `openssl ca -startdate/

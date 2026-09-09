@@ -1093,10 +1093,18 @@ pub enum PathError {
     Malformed,
 }
 
-// wolfCrypt return codes, from `error-crypt.h`. **Every one of these was observed**, not
-// merely read: an unrelated anchor returned −188, an expired leaf −151, a future-dated leaf
-// −150, and a leaf with one flipped signature byte −155 (ARCH Rev 1.26 §6.9's §5.4 table
-// marked the last three "header only"; this closes that gap).
+// wolfCrypt return codes, from `error-crypt.h`. **Every one is observed by a committed test**,
+// not merely read from a header — and each claim below names the test, because under §7 a
+// comment asserting an observation is not itself evidence:
+//   −188 `test_a3_unrelated_root_reports_untrusted_signer_not_signature_invalid`
+//   −275 `test_a3_self_signed_non_anchor_is_untrusted_signer`
+//   −151 / −150 `test_a3_expired_and_not_yet_valid_signers_are_named_distinctly`
+//   −155 `test_a3_corrupted_signature_reports_signature_invalid`
+//
+// The −155 line is a correction. This comment previously claimed all four were observed while
+// **no test drove a certificate to −155** — the untrusted-signer test only asserts the error
+// is *not* `SignatureInvalid`, a negative assertion. ARCH Rev 1.27 §6.9 recorded the row as
+// still "header only" for that reason; the test named above closes it.
 const ASN_BEFORE_DATE_E: c_int = -150;
 const ASN_AFTER_DATE_E: c_int = -151;
 const ASN_SIG_CONFIRM_E_CERT: c_int = -155;
