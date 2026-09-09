@@ -30,7 +30,7 @@
 //! below are over-allocated past those sizes and 16-byte aligned (C uses only its
 //! struct's real bytes within). Pinned to wolfSSL 5.9.2.
 
-use core::ffi::{c_int, c_void};
+use core::ffi::{c_int, c_long, c_void};
 use core::ptr;
 
 type Byte = u8;
@@ -226,6 +226,32 @@ unsafe extern "C" {
     fn brokkr_pkcs7_verify_cert(p7: *const c_void) -> *const Byte;
     fn brokkr_pkcs7_verify_cert_sz(p7: *const c_void) -> Word32;
 
+    // ---- certificate path validation (OQGF-A-3, ARCH Rev 1.26) ---------------------
+    // wolfSSL's Certificate Manager does RFC 5280 path building with no TLS session,
+    // which is what a timestamp client needs: a certificate and a set of anchors.
+    fn wolfSSL_CertManagerNew() -> *mut c_void;
+    fn wolfSSL_CertManagerFree(cm: *mut c_void);
+    fn wolfSSL_CertManagerLoadCABuffer(
+        cm: *mut c_void,
+        buf: *const Byte,
+        sz: c_long,
+        format: c_int,
+    ) -> c_int;
+    fn wolfSSL_CertManagerVerifyBuffer(
+        cm: *mut c_void,
+        buf: *const Byte,
+        sz: c_long,
+        format: c_int,
+    ) -> c_int;
+
+    // DecodedCert, for the EKU byte only. The chain decision is the CertManager's.
+    fn wc_InitDecodedCert(cert: *mut c_void, source: *const Byte, sz: Word32, heap: *mut c_void);
+    fn wc_ParseCert(cert: *mut c_void, cert_type: c_int, verify: c_int, cm: *mut c_void)
+    -> c_int;
+    fn wc_FreeDecodedCert(cert: *mut c_void);
+    fn brokkr_cert_ext_key_usage(dc: *const c_void) -> Word32;
+    fn brokkr_extkeyuse_timestamp() -> Word32;
+    fn brokkr_decoded_cert_sizeof() -> Word32;
 }
 
 /// A wolfCrypt error return (0 = success).
@@ -893,8 +919,43 @@ fn cms_error_from(rc: c_int) -> CmsError {
 }
 
 /// Verify a CMS `SignedData` bundle against `trust_anchor_der`, returning the
-/// authenticated eContent and the derivation OIDs.
+/// authenticated eContent and the derivation OIDs, **pinned to the anchor**: the
+/// certificate that actually verified the signature must equal `trust_anchor_der`.
+///
+/// **This is the default and the stricter check** — it admits exactly one certificate.
+/// Callers that need chain validation instead ask for it explicitly through
+/// [`cms_verify_unpinned`] plus [`verify_cert_path`]; the more permissive check is never
+/// acquired by upgrading (ARCH Rev 1.26 §6.9).
 pub fn cms_verify(bundle: &[u8], trust_anchor_der: &[u8]) -> Result<VerifiedCms, CmsError> {
+    let out = cms_verify_unpinned(bundle, trust_anchor_der)?;
+
+    // **Anchor pinning.** The signature verified — but under whose certificate? Require it
+    // to be the one configured. `SignatureInvalid` is the honest mapping: the requirement
+    // is that the signature verify *against the configured trust anchor*, and it did not.
+    //
+    // LIMIT, stated rather than implied: this is **pinning, not chain validation**. It
+    // holds when the authority's signing certificate IS the anchor (a self-signed TSA, and
+    // the local test responder). A TSA whose signing certificate is issued by a CA needs
+    // [`verify_cert_path`] instead.
+    if out.used_cert != trust_anchor_der {
+        return Err(CmsError::SignatureInvalid);
+    }
+    Ok(out)
+}
+
+/// Verify the CMS signature and return which certificate verified it, **without** requiring
+/// that certificate to equal `trust_anchor_der`.
+///
+/// **On its own this establishes only that the token is internally consistent** — an RFC
+/// 3161 token embeds its own signer certificate, so a bundle vouches for itself. A caller
+/// SHALL follow this with a trust decision over [`VerifiedCms::used_cert`]: either equality
+/// with a configured anchor ([`cms_verify`]) or path validation ([`verify_cert_path`]).
+/// Calling this and ignoring `used_cert` reintroduces exactly the circularity Rev 1.25
+/// closed.
+pub fn cms_verify_unpinned(
+    bundle: &[u8],
+    trust_anchor_der: &[u8],
+) -> Result<VerifiedCms, CmsError> {
     // The wc_PKCS7 handle is opaque: sized by the shim (which asks the compiler) and only
     // ever held behind a pointer. This is the ffi.rs discipline — no Rust-side layout
     // assumption — with the size obtained from the compiler rather than from a probe.
@@ -959,20 +1020,154 @@ pub fn cms_verify(bundle: &[u8], trust_anchor_der: &[u8]) -> Result<VerifiedCms,
         v
     };
 
-    // **Anchor pinning.** The signature verified — but under whose certificate? Require it
-    // to be the one configured. `SignatureInvalid` is the honest mapping: the requirement
-    // is that the signature verify *against the configured trust anchor*, and it did not.
-    //
-    // LIMIT, stated rather than implied: this is **pinning, not chain validation**. It
-    // holds when the authority's signing certificate IS the anchor (a self-signed TSA, and
-    // the local test responder). A TSA whose signing certificate is issued by a CA would
-    // need path building and validation, which is not implemented here.
-    if out.used_cert != trust_anchor_der {
-        return Err(CmsError::SignatureInvalid);
-    }
-
     if out.content.is_empty() {
         return Err(CmsError::Malformed);
     }
     Ok(out)
+}
+
+// =========================================================================================
+// Certificate path validation (OQGF-A-3; ARCH Rev 1.26 §6.9)
+// =========================================================================================
+
+/// `WOLFSSL_FILETYPE_ASN1` — DER. Probed from the headers (`= 2`).
+const FILETYPE_ASN1: c_int = 2;
+/// `WOLFSSL_SUCCESS`.
+const WOLFSSL_SUCCESS: c_int = 1;
+/// `CERT_TYPE` / `NO_VERIFY` (`asn.h`, both `0`). `NO_VERIFY` is deliberate: the chain
+/// decision belongs to the Certificate Manager and has already been made. This parse exists
+/// only to read one byte, and re-verifying here would be a second, weaker opinion on trust.
+const CERT_TYPE: c_int = 0;
+const NO_VERIFY: c_int = 0;
+
+/// Why certificate path validation failed. Each variant is a **different investigation** for
+/// an operator, which is why they are not collapsed (ARCH Rev 1.26 §6.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathError {
+    /// `ASN_NO_SIGNER_E` (−188) or `ASN_SELF_SIGNED_E` (−275): the leaf chains to no
+    /// configured anchor. **The anchor set is wrong or the authority rotated CAs** — not a
+    /// signature problem, and reporting it as one sends an operator hunting an attacker.
+    UntrustedSigner,
+    /// `ASN_SIG_CONFIRM_E` (−155): the chain reached an anchor and a signature is wrong.
+    SignatureInvalid,
+    /// `ASN_AFTER_DATE_E` (−151): the certificate has expired.
+    Expired,
+    /// `ASN_BEFORE_DATE_E` (−150): the certificate is not yet valid — usually a local clock
+    /// problem, which in a component whose purpose is attesting time deserves its own word.
+    NotYetValid,
+    /// The leaf does not carry `id-kp-timeStamping`. Not a wolfSSL code: policy RFC 3161
+    /// requires and `CertManagerVerifyBuffer` does not enforce.
+    NotTimestamping,
+    /// An anchor could not be loaded, or the certificate did not parse.
+    Malformed,
+}
+
+// wolfCrypt return codes, from `error-crypt.h`. **Every one of these was observed**, not
+// merely read: an unrelated anchor returned −188, an expired leaf −151, a future-dated leaf
+// −150, and a leaf with one flipped signature byte −155 (ARCH Rev 1.26 §6.9's §5.4 table
+// marked the last three "header only"; this closes that gap).
+const ASN_BEFORE_DATE_E: c_int = -150;
+const ASN_AFTER_DATE_E: c_int = -151;
+const ASN_SIG_CONFIRM_E_CERT: c_int = -155;
+const ASN_NO_SIGNER_E: c_int = -188;
+const ASN_SELF_SIGNED_E: c_int = -275;
+
+fn path_error_from(rc: c_int) -> PathError {
+    match rc {
+        ASN_NO_SIGNER_E | ASN_SELF_SIGNED_E => PathError::UntrustedSigner,
+        ASN_SIG_CONFIRM_E_CERT => PathError::SignatureInvalid,
+        ASN_AFTER_DATE_E => PathError::Expired,
+        ASN_BEFORE_DATE_E => PathError::NotYetValid,
+        // Fail closed: an unrecognized code has not established which of the above happened,
+        // and claiming one would assert more than was observed.
+        _ => PathError::Malformed,
+    }
+}
+
+/// Validate `leaf_der` against `root_der` plus `intermediates_der` (root-first trust order)
+/// under RFC 5280, then require the leaf to carry `id-kp-timeStamping`.
+///
+/// **What this proves:** the leaf chains to an anchor this deployment configured, and is
+/// authorized to timestamp. **What it does not:** that the authority's clock is right, or
+/// that a CA-issued authority is trustworthy. It replaces a *circular* trust decision — the
+/// token nominating its own verifier — with an *explicit* one, and explicit is not sound.
+pub fn verify_cert_path(
+    leaf_der: &[u8],
+    root_der: &[u8],
+    intermediates_der: &[Vec<u8>],
+) -> Result<(), PathError> {
+    // SAFETY: CertManagerNew returns an owned handle or null; every path below frees it
+    // exactly once, and the buffers outlive each call because they are borrowed for the
+    // duration of the function.
+    unsafe {
+        let cm = wolfSSL_CertManagerNew();
+        if cm.is_null() {
+            return Err(PathError::Malformed);
+        }
+        // Root first, then intermediates in trust order.
+        let load = |der: &[u8]| -> bool {
+            wolfSSL_CertManagerLoadCABuffer(
+                cm,
+                der.as_ptr(),
+                der.len() as c_long,
+                FILETYPE_ASN1,
+            ) == WOLFSSL_SUCCESS
+        };
+        if !load(root_der) {
+            wolfSSL_CertManagerFree(cm);
+            return Err(PathError::Malformed);
+        }
+        for inter in intermediates_der {
+            if !load(inter) {
+                wolfSSL_CertManagerFree(cm);
+                return Err(PathError::Malformed);
+            }
+        }
+        let rc = wolfSSL_CertManagerVerifyBuffer(
+            cm,
+            leaf_der.as_ptr(),
+            leaf_der.len() as c_long,
+            FILETYPE_ASN1,
+        );
+        wolfSSL_CertManagerFree(cm);
+        if rc != WOLFSSL_SUCCESS {
+            return Err(path_error_from(rc));
+        }
+    }
+
+    // RFC 3161 policy, checked separately because the CertManager does not enforce it.
+    if !cert_has_timestamping_eku(leaf_der)? {
+        return Err(PathError::NotTimestamping);
+    }
+    Ok(())
+}
+
+/// Whether `cert_der` carries `id-kp-timeStamping` (`EXTKEYUSE_TIMESTAMP`).
+///
+/// Parsed with `NO_VERIFY`: the chain decision is the Certificate Manager's and has already
+/// been made. This reads one byte.
+pub fn cert_has_timestamping_eku(cert_der: &[u8]) -> Result<bool, PathError> {
+    // SAFETY: brokkr_decoded_cert_sizeof is a pure `sizeof` in the shim.
+    let size = unsafe { brokkr_decoded_cert_sizeof() } as usize;
+    if size == 0 {
+        return Err(PathError::Malformed);
+    }
+    let mut handle: Vec<u8> = vec![0u8; size];
+    let p = handle.as_mut_ptr().cast::<c_void>();
+
+    // SAFETY: `p` is a zeroed buffer of exactly sizeof(DecodedCert), which is what
+    // wc_InitDecodedCert requires. `cert_der` outlives every call. Free happens on both
+    // paths before returning.
+    unsafe {
+        wc_InitDecodedCert(p, cert_der.as_ptr(), cert_der.len() as Word32, ptr::null_mut());
+        let rc = wc_ParseCert(p, CERT_TYPE, NO_VERIFY, ptr::null_mut());
+        if rc != 0 {
+            wc_FreeDecodedCert(p);
+            return Err(PathError::Malformed);
+        }
+        let eku = brokkr_cert_ext_key_usage(p);
+        let timestamp_bit = brokkr_extkeyuse_timestamp();
+        wc_FreeDecodedCert(p);
+        Ok(eku & timestamp_bit != 0)
+    }
 }

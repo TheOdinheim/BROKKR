@@ -27,6 +27,7 @@
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/wolfcrypt/pkcs7.h>
+#include <wolfssl/wolfcrypt/asn.h>
 
 /* The DER TSTInfo (CMS eContent). NULL if absent or the handle is NULL. */
 const unsigned char *brokkr_pkcs7_content(const wc_PKCS7 *p7) {
@@ -79,6 +80,35 @@ unsigned int brokkr_pkcs7_verify_cert_sz(const wc_PKCS7 *p7) {
         return 0;
     }
     return (unsigned int)p7->verifyCertSz;
+}
+
+/* ---- certificate accessors (OQGF-A-3 path validation, ARCH Rev 1.26) ----------------
+ *
+ * The extended-key-usage bitfield of a parsed certificate. RFC 3161 requires the TSA's
+ * signing certificate to carry id-kp-timeStamping (EXTKEYUSE_TIMESTAMP, 0x20), and
+ * wolfSSL_CertManagerVerifyBuffer performs path validation WITHOUT enforcing application
+ * EKU policy — so nothing checks it unless the caller does.
+ *
+ * Same rationale as the PKCS#7 accessors: `extExtKeyUsage` itself is unguarded, but fields
+ * BEFORE it in DecodedCert sit behind WOLFSSL_ASN_CA_ISSUER and WOLFSSL_AKID_NAME, so its
+ * offset depends on build flags. A shim compiled with the library's own flags is told the
+ * layout by the compiler rather than guessing at it. */
+unsigned int brokkr_cert_ext_key_usage(const DecodedCert *dc) {
+    if (dc == 0) {
+        return 0;
+    }
+    return (unsigned int)dc->extExtKeyUsage;
+}
+
+/* The EXTKEYUSE_TIMESTAMP bit, so Rust does not hard-code a constant that belongs to the
+ * library. */
+unsigned int brokkr_extkeyuse_timestamp(void) {
+    return (unsigned int)EXTKEYUSE_TIMESTAMP;
+}
+
+/* sizeof(DecodedCert), for the same opaque-buffer reason as sizeof(wc_PKCS7). */
+unsigned int brokkr_decoded_cert_sizeof(void) {
+    return (unsigned int)sizeof(DecodedCert);
 }
 
 /* sizeof(wc_PKCS7), so Rust can heap-allocate a correctly sized opaque buffer without
