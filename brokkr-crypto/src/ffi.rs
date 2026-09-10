@@ -1093,18 +1093,31 @@ pub enum PathError {
     Malformed,
 }
 
-// wolfCrypt return codes, from `error-crypt.h`. **Every one is observed by a committed test**,
-// not merely read from a header — and each claim below names the test, because under §7 a
-// comment asserting an observation is not itself evidence:
+// wolfCrypt return codes, from `error-crypt.h`. Each claim names the committed test that
+// drives it, because under §7 a comment asserting an observation is not itself evidence:
 //   −188 `test_a3_unrelated_root_reports_untrusted_signer_not_signature_invalid`
-//   −275 `test_a3_self_signed_non_anchor_is_untrusted_signer`
+//        and `test_a3_self_signed_non_anchor_is_untrusted_signer` (both — see below)
 //   −151 / −150 `test_a3_expired_and_not_yet_valid_signers_are_named_distinctly`
 //   −155 `test_a3_corrupted_signature_reports_signature_invalid`
+//   −275 **NOT OBSERVED — unreachable in this build.** See below.
 //
-// The −155 line is a correction. This comment previously claimed all four were observed while
-// **no test drove a certificate to −155** — the untrusted-signer test only asserts the error
-// is *not* `SignatureInvalid`, a negative assertion. ARCH Rev 1.27 §6.9 recorded the row as
-// still "header only" for that reason; the test named above closes it.
+// **`ASN_SELF_SIGNED_E` (−275) cannot be returned by the linked library**, and this is a
+// property of the build rather than a gap in the tests. `asn.c:23877` returns it only under
+// `#if defined(OPENSSL_ALL) || defined(WOLFSSL_QT)`; otherwise the identical branch returns
+// `ASN_NO_SIGNER_E`. **Neither macro is defined in this build** — verified by compiling a
+// probe against the build's own `options.h` — so every no-signer case, self-signed or not,
+// returns −188. The self-signed test asserts `UntrustedSigner` and gets there via −188; its
+// certificate was probed and returns −188.
+//
+// The arm below is **kept deliberately even though it cannot fire here.** Deleting it would
+// send a genuinely self-signed rejection to the `_ =>` catch-all and report an untrusted
+// signer as `Malformed` — a wrong verdict in an audit record — the moment anyone rebuilt
+// wolfSSL with `OPENSSL_ALL`. A correct unreachable arm is better than a reachable wrong one.
+//
+// This block is a correction, twice over. It previously claimed −155 was observed when no
+// test drove it (closed by the test named above), and then claimed −275 was observed by the
+// self-signed test, which asserts a variant reachable from two codes and in fact exercises
+// the other one. ARCH Rev 1.27 §6.9 carried the first correction; this carries the second.
 const ASN_BEFORE_DATE_E: c_int = -150;
 const ASN_AFTER_DATE_E: c_int = -151;
 const ASN_SIG_CONFIRM_E_CERT: c_int = -155;
@@ -1113,6 +1126,8 @@ const ASN_SELF_SIGNED_E: c_int = -275;
 
 fn path_error_from(rc: c_int) -> PathError {
     match rc {
+        // ASN_SELF_SIGNED_E is unreachable in this build (see above) and is retained so a
+        // rebuild with OPENSSL_ALL does not silently downgrade it to `Malformed`.
         ASN_NO_SIGNER_E | ASN_SELF_SIGNED_E => PathError::UntrustedSigner,
         ASN_SIG_CONFIRM_E_CERT => PathError::SignatureInvalid,
         ASN_AFTER_DATE_E => PathError::Expired,
