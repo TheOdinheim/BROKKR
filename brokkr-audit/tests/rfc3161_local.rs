@@ -741,6 +741,95 @@ fn test_a3_anchor_equality_still_accepts_a_conformant_signer() {
 }
 
 
+/// Garbage that is not a certificate reports `Malformed`, via the catch-all arm.
+///
+/// **`PathError::Malformed` had zero assertions before this test.** Its only appearance in
+/// the suite was a `match` arm in the test's own mapping mirror — which is not an assertion,
+/// and which c1eb158 deleted. The variant is genuinely reachable: `wc_ParseCert` rejects
+/// non-certificate bytes, and an unrecognized wolfSSL return code (observed `-140` for
+/// garbage DER) falls to `path_error_from`'s `_ =>` arm.
+///
+/// That catch-all is the fail-closed default, and asserting it matters for a reason beyond
+/// coverage: it is what an unrecognized code becomes. If wolfSSL ever returned a code this
+/// mapping does not name, the result would be `Malformed` — not a wrong specific claim.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_garbage_is_malformed_not_a_specific_claim() {
+    let dir = ca_dir();
+    let root = std::fs::read(dir.join("ca.der")).expect("root");
+
+    let e = brokkr_crypto::ffi::verify_cert_path(b"not a certificate at all", &root, &[])
+        .expect_err("garbage must not validate");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::Malformed);
+    assert_eq!(
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
+        TimestampError::Malformed
+    );
+
+    // A truncated real certificate takes the same path — well-formed prefix, no valid whole.
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+    let e = brokkr_crypto::ffi::verify_cert_path(&good[..good.len() / 2], &root, &[])
+        .expect_err("a truncated certificate must not validate");
+    assert_eq!(e, brokkr_crypto::ffi::PathError::Malformed);
+
+    // And fitness reports Malformed on unparseable input rather than a fitness verdict —
+    // "this did not parse" must not be reported as "this is not a TSA certificate".
+    assert_eq!(
+        brokkr_audit::rfc3161::signer_fitness(b"not a certificate at all"),
+        Err(TimestampError::Malformed)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An authority that cannot be reached reports `Unreachable`, distinctly from a token that
+/// arrives and fails.
+///
+/// **`TimestampError::Unreachable` had zero assertions before this test.** It is hermetic:
+/// bind a port to learn one that is free, drop the listener, then connect. Nothing listens,
+/// so the connection is refused without any network egress beyond loopback.
+///
+/// The distinction is the point. `Unreachable` says the authority was configured and could
+/// not be contacted — an operational condition an operator resolves by looking at the network
+/// or the endpoint. Every other variant says something arrived and was rejected. Collapsing
+/// them would send an operator hunting a bad token when the authority is simply down, and a
+/// record marked `Unavailable` carries this text into the audit chain.
+#[test]
+fn test_a3_unreachable_authority_is_named_as_such() {
+    // Bind, read the port, drop: the port is then free and nothing is listening on it.
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        l.local_addr().expect("addr").port()
+    };
+
+    let client = brokkr_audit::Rfc3161Client::new(
+        format!("127.0.0.1:{port}"),
+        "unreachable-test",
+        brokkr_audit::SignerTrust::AnchorEquality { anchor_der: vec![0u8; 4] },
+        std::time::Duration::from_millis(500),
+    );
+
+    use brokkr_audit::event::TimestampAuthority;
+    let digest = Sha384Hasher.hash(b"a record");
+    let e = client
+        .stamp(&digest.bytes)
+        .expect_err("a closed port must not yield a token");
+    assert_eq!(
+        e,
+        TimestampError::Unreachable,
+        "a refused connection is an unreachable authority, not a malformed or unverifiable \
+         token — nothing arrived to be malformed"
+    );
+    assert_ne!(e, TimestampError::Malformed);
+
+    // And the record-level consequence: SAGA still appends, recording the absence rather
+    // than refusing to record. A record marked Unavailable is still a valid record.
+    assert!(
+        format!("{e}").contains("unreachable"),
+        "the Display text reaches the audit chain via Timestamping::Unavailable"
+    );
+}
+
 /// Expired and not-yet-valid signers are reported as themselves.
 ///
 /// **These two mappings were "header only" until this test.** `openssl ca -startdate/
