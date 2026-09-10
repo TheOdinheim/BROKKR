@@ -91,7 +91,15 @@ pub struct Rfc3161Client {
 /// rather than collapsed: an operator investigating "the issuer is unknown" looks at an
 /// anchor set, one investigating "the signature is wrong" looks for tampering, and one
 /// investigating "not yet valid" looks at a clock.
-fn path_to_timestamp_error(e: PathError) -> TimestampError {
+/// Map a certificate-path failure to the record-level error an operator reads.
+///
+/// **`pub` so tests assert THIS mapping rather than a copy of it.** It was private through
+/// ARCH Rev 1.27, so `rfc3161_local.rs` carried a mirror named `path_err_to_ts` that
+/// restated every arm. The two were identical, and nothing enforced that they stay so: a
+/// wrong arm here would reach the audit record with no test failing, because the test was
+/// checking its own restatement. That is the circular shape CLAUDE.md §7 names — a scanner
+/// verified against its own inventory — at the scale of one function.
+pub fn path_to_timestamp_error(e: PathError) -> TimestampError {
     match e {
         PathError::UntrustedSigner => TimestampError::UntrustedSigner,
         PathError::SignatureInvalid => TimestampError::SignatureInvalid,

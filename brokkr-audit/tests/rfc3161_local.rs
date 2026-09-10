@@ -397,7 +397,7 @@ fn test_a3_unrelated_root_reports_untrusted_signer_not_signature_invalid() {
          investigation at the one thing that is not wrong"
     );
     assert_eq!(
-        path_err_to_ts(e),
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
         TimestampError::UntrustedSigner,
         "and the distinction must survive the mapping into the record-level error"
     );
@@ -438,7 +438,7 @@ fn test_a3_signer_without_timestamping_eku_is_refused() {
         .expect_err("a non-timestamping certificate must not be accepted as a TSA signer");
     assert_eq!(e, brokkr_crypto::ffi::PathError::TimestampingEkuAbsent);
     assert_eq!(
-        path_err_to_ts(e),
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
         TimestampError::NotTimestampingCertificate
     );
 
@@ -493,14 +493,14 @@ fn test_a3_non_critical_timestamping_eku_is_refused() {
         .expect_err("a non-critical timestamping EKU must not be accepted as a TSA signer");
     assert_eq!(e, brokkr_crypto::ffi::PathError::TimestampingEkuNotCritical);
     assert_eq!(
-        path_err_to_ts(e),
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
         TimestampError::TimestampingEkuNotCritical,
         "and it must NOT report NotTimestampingCertificate: this certificate IS a \
          timestamping certificate, and saying otherwise sends the operator to fix a \
          deployment that is correct"
     );
     assert_ne!(
-        path_err_to_ts(e),
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
         TimestampError::NotTimestampingCertificate
     );
 
@@ -557,7 +557,7 @@ fn test_a3_non_exclusive_timestamping_eku_is_refused() {
             "{name}: a multi-purpose signing key must be named as such"
         );
         assert_eq!(
-            path_err_to_ts(e),
+            brokkr_audit::rfc3161::path_to_timestamp_error(e),
             TimestampError::TimestampingEkuNotExclusive,
             "{name}: and the distinction must survive into the record-level error, where an \
              operator reads it — this is the finding a deployment might carry as an AMD-006 \
@@ -592,7 +592,7 @@ fn test_a3_the_three_eku_failures_are_distinguished() {
         let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
         let got = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[]).unwrap_err();
         assert_eq!(got, want_path, "{name}");
-        assert_eq!(path_err_to_ts(got), want_ts, "{name}");
+        assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(got), want_ts, "{name}");
         seen.push(got);
     }
 
@@ -655,7 +655,7 @@ fn test_a3_corrupted_signature_reports_signature_invalid() {
         "reporting this as UntrustedSigner would send an operator to fix an anchor set that \
          is correct — the Rev 1.26 distinction, asserted here from the other direction"
     );
-    assert_eq!(path_err_to_ts(e), TimestampError::SignatureInvalid);
+    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::SignatureInvalid);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -676,13 +676,13 @@ fn test_a3_expired_and_not_yet_valid_signers_are_named_distinctly() {
     let e = brokkr_crypto::ffi::verify_cert_path(&expired, &root, &[])
         .expect_err("an expired signer must not validate");
     assert_eq!(e, brokkr_crypto::ffi::PathError::Expired);
-    assert_eq!(path_err_to_ts(e), TimestampError::CertificateExpired);
+    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::CertificateExpired);
 
     let future = std::fs::read(dir.join("future.der")).expect("future");
     let e = brokkr_crypto::ffi::verify_cert_path(&future, &root, &[])
         .expect_err("a not-yet-valid signer must not validate");
     assert_eq!(e, brokkr_crypto::ffi::PathError::NotYetValid);
-    assert_eq!(path_err_to_ts(e), TimestampError::CertificateNotYetValid);
+    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::CertificateNotYetValid);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -718,21 +718,6 @@ fn test_a3_anchor_equality_is_unchanged_and_is_not_upgraded() {
     let _ = std::fs::remove_dir_all(&other);
 }
 
-/// The record-level mapping, mirroring `rfc3161::path_to_timestamp_error`, so these tests
-/// assert the distinction that reaches an operator rather than only the FFI code.
-fn path_err_to_ts(e: brokkr_crypto::ffi::PathError) -> TimestampError {
-    use brokkr_crypto::ffi::PathError as P;
-    match e {
-        P::UntrustedSigner => TimestampError::UntrustedSigner,
-        P::SignatureInvalid => TimestampError::SignatureInvalid,
-        P::Expired => TimestampError::CertificateExpired,
-        P::NotYetValid => TimestampError::CertificateNotYetValid,
-        P::TimestampingEkuAbsent => TimestampError::NotTimestampingCertificate,
-        P::TimestampingEkuNotCritical => TimestampError::TimestampingEkuNotCritical,
-        P::TimestampingEkuNotExclusive => TimestampError::TimestampingEkuNotExclusive,
-        P::Malformed => TimestampError::Malformed,
-    }
-}
 
 /// **End to end through `TimestampAuthority::stamp` with a CA-issued authority.**
 ///
