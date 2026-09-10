@@ -63,7 +63,7 @@
 pub mod mtls;
 pub use mtls::{GatewayConfig, MtlsTransport, Negotiated, TransportError, map_group};
 
-use brokkr_barrier::{AcceptanceResolver, EndpointCeiling, Huth};
+use brokkr_barrier::{PurposeFieldResolver, AcceptanceResolver, EndpointCeiling, Huth};
 use brokkr_core::barrier::{Barrier, BarrierVerdict, BoundaryFlow, Destination};
 use brokkr_core::classification::{
     ChannelStrength, Classification, NamedGroup, effective_authorization,
@@ -126,20 +126,26 @@ pub struct CrossingRecord {
 /// };
 /// let _ = ClearedContext { inner: ctx }; // E0451: field `inner` is private
 /// ```
-pub struct Bifrost<C: EndpointCeiling + Clone, A: AcceptanceResolver> {
-    huth: Huth<C, A>,
+pub struct Bifrost<C: EndpointCeiling + Clone, A: AcceptanceResolver, F: PurposeFieldResolver> {
+    huth: Huth<C, A, F>,
     ceiling: C,
 }
 
-impl<C: EndpointCeiling + Clone, A: AcceptanceResolver> Bifrost<C, A> {
+impl<C: EndpointCeiling + Clone, A: AcceptanceResolver, F: PurposeFieldResolver> Bifrost<C, A, F> {
     /// Construct a crossing. `bcr_key`/`dap_key` are the dual-family public bytes HÚÐ verifies BCR
     /// and acceptance signatures under; `ceiling` resolves an endpoint to its declared ceiling
     /// (REGIN's in production); `acceptances` is the AMD-006 acceptance register seam. HÚÐ is built
     /// from a **clone** of `ceiling`, so the gate and the record read the same ceiling data. There
     /// is **no** `now` here — the evaluation time arrives per call (I-13).
-    pub fn new(bcr_key: KeyBytes, dap_key: KeyBytes, ceiling: C, acceptances: A) -> Self {
+    pub fn new(
+        bcr_key: KeyBytes,
+        dap_key: KeyBytes,
+        ceiling: C,
+        acceptances: A,
+        purpose_fields: F,
+    ) -> Self {
         Bifrost {
-            huth: Huth::new(bcr_key, dap_key, ceiling.clone(), acceptances),
+            huth: Huth::new(bcr_key, dap_key, ceiling.clone(), acceptances, purpose_fields),
             ceiling,
         }
     }
@@ -189,7 +195,9 @@ impl<C: EndpointCeiling + Clone, A: AcceptanceResolver> Bifrost<C, A> {
 /// **BIFRÖST does not override [`ContextClearance::clear`]** — core's provided `clear` is the sole
 /// minter of [`brokkr_core::reasoner::ClearedContext`] (I-12), and BIFRÖST supplies only the verdict
 /// half. Nothing in this crate constructs a `ClearedContext`.
-impl<C: EndpointCeiling + Clone, A: AcceptanceResolver> ContextClearance for Bifrost<C, A> {
+impl<C: EndpointCeiling + Clone, A: AcceptanceResolver, F: PurposeFieldResolver> ContextClearance
+    for Bifrost<C, A, F>
+{
     fn evaluate_context(
         &self,
         ctx: &Context,

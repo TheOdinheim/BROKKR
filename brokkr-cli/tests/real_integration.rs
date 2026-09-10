@@ -309,6 +309,7 @@ fn real_governed_hop_writes_a_file_with_real_pqc() {
         (b_ml, b_slh),                 // dap key
         InMemoryCeiling::new(),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
 
     // --- the proposal MÍMIR will return: write to the temp file ---

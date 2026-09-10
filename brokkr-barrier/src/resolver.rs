@@ -7,6 +7,8 @@
 //! but `brokkr-barrier` SHALL NOT depend on `brokkr-genome` (§6.5). REGIN supplies a
 //! [`EndpointCeiling`] implementation; the Barrier consumes the trait.
 
+use brokkr_core::ids::FieldName;
+use brokkr_core::personal_data::Purpose;
 use brokkr_core::classification::Classification;
 use brokkr_core::ids::{FindingId, ModelEndpointId, RiskAcceptanceId};
 use brokkr_core::risk::RiskAcceptance;
@@ -94,5 +96,45 @@ impl InMemoryAcceptances {
 impl AcceptanceResolver for InMemoryAcceptances {
     fn resolve(&self, finding: &FindingId) -> Option<(RiskAcceptanceId, RiskAcceptance)> {
         self.by_finding.get(finding).cloned()
+    }
+}
+
+/// Resolve a declared [`Purpose`] to the field set the signed policy permits it
+/// (OQGF-P-11.2; ARCH Rev 1.29 §6.5).
+///
+/// **`None` means the purpose is not declared in the policy, and that is a REFUSAL, not a
+/// permission.** An undeclared purpose has no allowed set, so nothing is within its scope.
+/// The alternative — an unresolvable purpose admitting everything — would make the control
+/// removable by declaring a purpose nobody registered. This is OQGF-P-2's fail-closed
+/// posture applied to a lookup, and the direction §6.2 already chose when an invariant with
+/// no declared predicate denies rather than passes.
+///
+/// A third seam beside [`EndpointCeiling`] and [`AcceptanceResolver`], for the same reason
+/// they exist: **`brokkr-barrier` SHALL NOT depend on `brokkr-genome` (I-5)**, so the
+/// barrier does not know where the policy came from. REGIN supplies an implementation.
+pub trait PurposeFieldResolver: Send + Sync {
+    fn allowed_fields(&self, purpose: &Purpose) -> Option<&[FieldName]>;
+}
+
+/// An in-memory [`PurposeFieldResolver`], for tests and for a caller assembling a policy
+/// from a verified genome. Linear scan: `Purpose` derives `PartialEq` but not `Hash`, and
+/// `PolicyRegister` already stores its declarations as vectors.
+#[derive(Debug, Default, Clone)]
+pub struct InMemoryPurposeFields {
+    entries: Vec<(Purpose, Vec<FieldName>)>,
+}
+
+impl InMemoryPurposeFields {
+    pub fn new(entries: Vec<(Purpose, Vec<FieldName>)>) -> Self {
+        Self { entries }
+    }
+}
+
+impl PurposeFieldResolver for InMemoryPurposeFields {
+    fn allowed_fields(&self, purpose: &Purpose) -> Option<&[FieldName]> {
+        self.entries
+            .iter()
+            .find(|(p, _)| p == purpose)
+            .map(|(_, f)| f.as_slice())
     }
 }

@@ -194,6 +194,7 @@ fn test_end_to_end_real_bifrost_clears_then_proposes() {
         (Vec::new(), Vec::new()),
         InMemoryCeiling::new().with(ModelEndpointId::new("mimir-1"), Classification::Internal),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
     let ctx = Context {
         payload: "read the file and summarize".to_string(),

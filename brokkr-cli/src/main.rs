@@ -384,6 +384,7 @@ fn build(cfg: &Config) -> Result<Session, String> {
         (b_ml.clone(), b_slh.clone()),
         InMemoryCeiling::new(),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
 
     // --- BIFRÖST (the reasoner crossing): endpoint ceiling Internal (collapses to Public over a
@@ -393,6 +394,7 @@ fn build(cfg: &Config) -> Result<Session, String> {
         (b_ml.clone(), b_slh),
         InMemoryCeiling::new().with(endpoint.clone(), Classification::Internal),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
 
     // --- MÍMIR (ollama backend, reached THROUGH BIFRÖST's mTLS transport — I-6) ---

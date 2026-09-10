@@ -875,6 +875,7 @@ fn attack_4_1_classified_context_denied_by_bifrost() {
         (b_ml.clone(), b_slh.clone()),
         InMemoryCeiling::new().with(ModelEndpointId::new("mimir"), Classification::Internal),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
     let (orch, spies) = build(
         Box::new(bifrost),

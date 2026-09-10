@@ -7,7 +7,7 @@
 //! an explicit parameter; the Barrier never reads a wall clock.
 
 use crate::canonical;
-use crate::resolver::{AcceptanceResolver, EndpointCeiling};
+use crate::resolver::{AcceptanceResolver, EndpointCeiling, PurposeFieldResolver};
 use brokkr_core::barrier::{
     Barrier, BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
@@ -29,22 +29,32 @@ type KeyBytes = (Vec<u8>, Vec<u8>);
 /// It holds two declared verifying keys, supplied out of band at construction: `bcr_key`
 /// verifies Boundary Custody Records (OQGF-I-9), and `dap_key` verifies risk acceptances
 /// (AMD-006). Neither is ever read from the artifact it verifies — that would be circular.
-pub struct Huth<C: EndpointCeiling, A: AcceptanceResolver> {
+pub struct Huth<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> {
     bcr_key: KeyBytes,
     dap_key: KeyBytes,
     ceiling: C,
     acceptances: A,
+    /// OQGF-P-11.2. Injected like the other two so `brokkr-barrier` does not depend on
+    /// `brokkr-genome` (I-5) — the barrier does not know where the signed policy came from.
+    purpose_fields: F,
 }
 
-impl<C: EndpointCeiling, A: AcceptanceResolver> Huth<C, A> {
+impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Huth<C, A, F> {
     /// Construct a Barrier. `bcr_key` and `dap_key` are raw dual-family public keys
     /// `(ml_dsa_65, slh_dsa_shake_192s)` for BCR and acceptance signatures respectively.
-    pub fn new(bcr_key: KeyBytes, dap_key: KeyBytes, ceiling: C, acceptances: A) -> Self {
+    pub fn new(
+        bcr_key: KeyBytes,
+        dap_key: KeyBytes,
+        ceiling: C,
+        acceptances: A,
+        purpose_fields: F,
+    ) -> Self {
         Self {
             bcr_key,
             dap_key,
             ceiling,
             acceptances,
+            purpose_fields,
         }
     }
 
@@ -223,6 +233,46 @@ impl<C: EndpointCeiling, A: AcceptanceResolver> Huth<C, A> {
                         datum: datum.clone(),
                     };
                 }
+                // Conditions 10 and 11 (OQGF-P-11.2, ARCH Rev 1.29 §6.5). Set containment
+                // over two DECLARATIONS — the declared purpose resolved in the signed
+                // policy, against the field set the crossing declares it carries. No
+                // content is read: none reaches the evaluator, and reading it would put a
+                // heuristic judgment inside a Deterministic Gate (OQGF-I-12).
+                //
+                // These REFUSE rather than quarantine, deliberately unlike the rules above.
+                // Quarantine suits unprovenanced data because provenance can be established
+                // afterwards and the datum is then admissible unchanged. A datum carrying
+                // out-of-scope fields is not waiting on a missing fact — it is the wrong
+                // data for this purpose, and holding it would imply some later step makes
+                // it admissible as it stands.
+                if matches!(context, ContextClass::Privileged)
+                    && let Some(tag) = personal.as_ref()
+                {
+                        // The classification comes from the BCR: `Ingress` carries none, and
+                        // conditions 10/11 are reached only once provenance is established,
+                        // so `b` exists. (Recorded in GAP-2026-09-10-001 §5.)
+                        let deny = |condition| BarrierVerdict::Deny {
+                            finding: BarrierFinding {
+                                datum: datum.clone(),
+                                condition,
+                                classification: b.classification,
+                                reason: String::from(reason_for(condition)),
+                            },
+                        };
+                        // 10 — an undeclared purpose has no allowed set, so nothing is
+                        // within its scope. `None` refuses; permitting would let the
+                        // control be removed by declaring an unregistered purpose.
+                        let Some(allowed) = self.purpose_fields.allowed_fields(&tag.purpose)
+                        else {
+                            return deny(BarrierCondition::PersonalDataFieldOutOfScope);
+                        };
+                        // 11 — every declared field must appear in the allowed set. An
+                        // empty allowed set admits a datum declaring no fields (vacuous)
+                        // and refuses any declared field.
+                        if !tag.fields.iter().all(|f| allowed.contains(f)) {
+                            return deny(BarrierCondition::PersonalDataFieldOutOfScope);
+                        }
+                    }
                 BarrierVerdict::Allow
             }
             None => match context {
@@ -253,7 +303,9 @@ impl<C: EndpointCeiling, A: AcceptanceResolver> Huth<C, A> {
     }
 }
 
-impl<C: EndpointCeiling, A: AcceptanceResolver> Barrier for Huth<C, A> {
+impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Barrier
+    for Huth<C, A, F>
+{
     fn evaluate(&self, flow: &BoundaryFlow, now: Timestamp) -> BarrierVerdict {
         match flow {
             BoundaryFlow::Egress {

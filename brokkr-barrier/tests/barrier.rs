@@ -5,7 +5,7 @@
 //! cross-artifact domain separation.
 
 use brokkr_barrier::canonical;
-use brokkr_barrier::{Huth, InMemoryAcceptances, InMemoryCeiling};
+use brokkr_barrier::{Huth, InMemoryAcceptances, InMemoryCeiling, InMemoryPurposeFields};
 use brokkr_core::barrier::{
     Barrier, BarrierCondition, BarrierFinding, BarrierVerdict, BoundaryCustodyRecord, BoundaryFlow,
     ContextClass, Destination, DestinationClass, PersonalDataTag,
@@ -13,10 +13,7 @@ use brokkr_core::barrier::{
 use brokkr_core::capability::EgressProtocol;
 use brokkr_core::classification::{ChannelStrength, Classification};
 use brokkr_core::crypto::DualSignature;
-use brokkr_core::ids::{
-    Dap, DatumRef, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId,
-    Timestamp,
-};
+use brokkr_core::ids::{Dap, DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp};
 use brokkr_core::personal_data::{Purpose, RetentionPeriod};
 use brokkr_core::risk::{DeterministicGateId, RiskAcceptance};
 use brokkr_crypto::{DualKeyPair, DualPublicKey};
@@ -114,7 +111,7 @@ fn barrier(
     bcr_kp: &DualKeyPair,
     dap_kp: &DualKeyPair,
     acceptances: InMemoryAcceptances,
-) -> Huth<InMemoryCeiling, InMemoryAcceptances> {
+) -> Huth<InMemoryCeiling, InMemoryAcceptances, InMemoryPurposeFields> {
     let ceiling =
         InMemoryCeiling::new().with(ModelEndpointId::new("mimir-1"), Classification::Secret);
     Huth::new(
@@ -122,6 +119,7 @@ fn barrier(
         public_bytes(dap_kp),
         ceiling,
         acceptances,
+        brokkr_barrier::InMemoryPurposeFields::default(),
     )
 }
 
@@ -548,6 +546,224 @@ fn test_personal_data_into_privileged_without_purpose_quarantines() {
         BarrierVerdict::Quarantine {
             datum: DatumRef::new("in-1")
         },
+    );
+}
+
+// ---- minimization (OQGF-P-11.2, ARCH Rev 1.29 §6.5) ----------------------------------
+
+/// A tag declaring `fields`, under the standard test purpose.
+fn tag_with(fields: &[&str]) -> PersonalDataTag {
+    let mut t = tag();
+    t.fields = fields.iter().map(|f| FieldName::new(*f)).collect();
+    t
+}
+
+/// A barrier whose signed policy permits `allowed` for the standard test purpose.
+fn barrier_with_policy(
+    bcr_kp: &DualKeyPair,
+    dap_kp: &DualKeyPair,
+    allowed: &[&str],
+) -> Huth<InMemoryCeiling, InMemoryAcceptances, InMemoryPurposeFields> {
+    let ceiling =
+        InMemoryCeiling::new().with(ModelEndpointId::new("mimir-1"), Classification::Secret);
+    Huth::new(
+        public_bytes(bcr_kp),
+        public_bytes(dap_kp),
+        ceiling,
+        InMemoryAcceptances::new(),
+        InMemoryPurposeFields::new(vec![(
+            tag().purpose,
+            allowed.iter().map(|f| FieldName::new(*f)).collect(),
+        )]),
+    )
+}
+
+/// A Privileged ingress whose BCR and flow both carry `t`, with provenance established.
+fn privileged_ingress(
+    bcr_kp: &mut DualKeyPair,
+    t: &PersonalDataTag,
+) -> (BoundaryFlow, BoundaryCustodyRecord) {
+    let bcr = signed_bcr(
+        bcr_kp,
+        "in-1",
+        Classification::Secret,
+        vec![],
+        Some(t.clone()),
+        NOW + 1000,
+    );
+    (
+        ingress("in-1", Some(t.clone()), Some(bcr.clone()), ContextClass::Privileged),
+        bcr,
+    )
+}
+
+/// A datum whose declared fields are all within the purpose's signed field set is admitted.
+#[test]
+fn test_oqgf_p_11_2_in_scope_fields_are_admitted() {
+    let (mut bcr_kp, dap_kp) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+    let t = tag_with(&["ticket_id", "email"]);
+    let (flow, _) = privileged_ingress(&mut bcr_kp, &t);
+    let b = barrier_with_policy(&bcr_kp, &dap_kp, &["ticket_id", "email", "locale"]);
+
+    assert_eq!(
+        b.evaluate(&flow, Timestamp(NOW)),
+        BarrierVerdict::Allow,
+        "a subset of the signed allowed set must be admitted — the policy need not be \
+         exhausted, only not exceeded"
+    );
+}
+
+/// A datum declaring a field outside the purpose's signed set is REFUSED, with the variant
+/// that says so.
+///
+/// **Refused, not quarantined**, and that differs from the surrounding ingress rules
+/// deliberately: quarantine suits *unprovenanced* data because provenance can be established
+/// afterwards and the datum is then admissible unchanged. Out-of-scope fields are not waiting
+/// on a missing fact — this is the wrong data for this purpose.
+#[test]
+fn test_oqgf_p_11_2_out_of_scope_field_is_refused() {
+    let (mut bcr_kp, dap_kp) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+    let t = tag_with(&["ticket_id", "national_id"]);
+    let (flow, _) = privileged_ingress(&mut bcr_kp, &t);
+    let b = barrier_with_policy(&bcr_kp, &dap_kp, &["ticket_id", "email"]);
+
+    let v = b.evaluate(&flow, Timestamp(NOW));
+    match v {
+        BarrierVerdict::Deny { finding } => {
+            assert_eq!(
+                finding.condition,
+                BarrierCondition::PersonalDataFieldOutOfScope,
+                "and NOT PersonalDataUndeclared, which means the opposite — here a Purpose \
+                 IS declared and the data exceeds it; reporting the opposite would send an \
+                 operator to add a declaration that is already present"
+            );
+            assert_ne!(finding.condition, BarrierCondition::PersonalDataUndeclared);
+            assert_eq!(finding.datum, DatumRef::new("in-1"));
+            // The classification comes from the BCR: Ingress carries none, and this
+            // condition is reached only once provenance is established.
+            assert_eq!(finding.classification, Classification::Secret);
+        }
+        other => panic!("expected Deny, got {other:?} — quarantine would imply a later step \
+                         could make this datum admissible as it stands"),
+    }
+}
+
+/// A purpose absent from the signed policy REFUSES rather than permits.
+///
+/// The load-bearing direction. If an unresolvable purpose admitted everything, the control
+/// would be removable by declaring a purpose nobody registered — OQGF-P-2's fail-closed
+/// posture applied to a lookup.
+#[test]
+fn test_oqgf_p_11_2_unresolvable_purpose_refuses() {
+    let (mut bcr_kp, dap_kp) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+    let t = tag_with(&["ticket_id"]);
+    let (flow, _) = privileged_ingress(&mut bcr_kp, &t);
+
+    // A policy that knows a DIFFERENT purpose. The declared one resolves to nothing.
+    let ceiling =
+        InMemoryCeiling::new().with(ModelEndpointId::new("mimir-1"), Classification::Secret);
+    let b = Huth::new(
+        public_bytes(&bcr_kp),
+        public_bytes(&dap_kp),
+        ceiling,
+        InMemoryAcceptances::new(),
+        InMemoryPurposeFields::new(vec![(
+            Purpose {
+                description: "some other purpose entirely".into(),
+            },
+            vec![FieldName::new("ticket_id")],
+        )]),
+    );
+
+    match b.evaluate(&flow, Timestamp(NOW)) {
+        BarrierVerdict::Deny { finding } => assert_eq!(
+            finding.condition,
+            BarrierCondition::PersonalDataFieldOutOfScope
+        ),
+        other => panic!(
+            "an unregistered purpose must refuse, not permit: {other:?}. Permitting would \
+             make the control removable by declaring a purpose nobody registered"
+        ),
+    }
+}
+
+/// An empty declared field set means the purpose may admit NO fields.
+///
+/// Both directions, because the vacuous case is the one a reader gets wrong: a datum
+/// declaring no fields passes containment vacuously; any declared field is refused.
+#[test]
+fn test_oqgf_p_11_2_empty_allowed_set_admits_nothing_but_permits_an_empty_datum() {
+    let (mut bcr_kp, dap_kp) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+
+    // Empty allowed set, empty declared set: vacuously contained.
+    let empty = tag_with(&[]);
+    let (flow, _) = privileged_ingress(&mut bcr_kp, &empty);
+    let b = barrier_with_policy(&bcr_kp, &dap_kp, &[]);
+    assert_eq!(
+        b.evaluate(&flow, Timestamp(NOW)),
+        BarrierVerdict::Allow,
+        "an empty declared set is vacuously within an empty allowed set"
+    );
+
+    // Empty allowed set, one declared field: refused.
+    let (mut bcr_kp2, dap_kp2) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+    let one = tag_with(&["email"]);
+    let (flow2, _) = privileged_ingress(&mut bcr_kp2, &one);
+    let b2 = barrier_with_policy(&bcr_kp2, &dap_kp2, &[]);
+    match b2.evaluate(&flow2, Timestamp(NOW)) {
+        BarrierVerdict::Deny { finding } => assert_eq!(
+            finding.condition,
+            BarrierCondition::PersonalDataFieldOutOfScope
+        ),
+        other => panic!("an empty allowed set must admit no field: {other:?}"),
+    }
+}
+
+/// The check applies to a Privileged Context and not elsewhere.
+///
+/// OQGF-P-11.2 gates admission into a training corpus, evaluation dataset, model registry,
+/// or AIBOM-governed artifact. A non-privileged context is not one, and refusing there would
+/// be stricter than the requirement — the over-tight direction OQGF-P-1 treats as a
+/// governance failure of equal standing to a missed threat.
+#[test]
+fn test_oqgf_p_11_2_non_privileged_context_is_not_gated() {
+    let (mut bcr_kp, dap_kp) = (
+        DualKeyPair::generate().unwrap(),
+        DualKeyPair::generate().unwrap(),
+    );
+    let t = tag_with(&["national_id"]);
+    let bcr = signed_bcr(
+        &mut bcr_kp,
+        "in-1",
+        Classification::Secret,
+        vec![],
+        Some(t.clone()),
+        NOW + 1000,
+    );
+    let b = barrier_with_policy(&bcr_kp, &dap_kp, &[]);
+    assert_eq!(
+        b.evaluate(
+            &ingress("in-1", Some(t), Some(bcr), ContextClass::NonPrivileged),
+            Timestamp(NOW)
+        ),
+        BarrierVerdict::Allow,
+        "minimization gates admission to a Privileged Context; gating elsewhere would be \
+         stricter than OQGF-P-11.2 requires"
     );
 }
 

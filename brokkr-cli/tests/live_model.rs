@@ -258,6 +258,7 @@ fn full_cycle_with_a_real_model() {
         (b_ml.clone(), b_slh.clone()),
         InMemoryCeiling::new(),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
 
     // --- real BIFRÖST: mTLS transport + the clearance gate ---
@@ -282,6 +283,7 @@ fn full_cycle_with_a_real_model() {
         (b_ml.clone(), b_slh),
         InMemoryCeiling::new().with(endpoint.clone(), Classification::Internal),
         InMemoryAcceptances::new(),
+        brokkr_barrier::InMemoryPurposeFields::default(),
     );
 
     // --- real MÍMIR: ollama backend, reached THROUGH BIFRÖST's transport (I-6) ---

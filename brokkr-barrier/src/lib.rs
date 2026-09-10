@@ -73,5 +73,8 @@ pub mod resolver;
 pub mod uncontrolled;
 
 pub use huth::Huth;
-pub use resolver::{AcceptanceResolver, EndpointCeiling, InMemoryAcceptances, InMemoryCeiling};
+pub use resolver::{
+    AcceptanceResolver, EndpointCeiling, InMemoryAcceptances, InMemoryCeiling,
+    InMemoryPurposeFields, PurposeFieldResolver,
+};
 pub use uncontrolled::{ReductionPosture, UncontrolledChannel, UncontrolledChannelRegister};
