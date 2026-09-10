@@ -660,6 +660,87 @@ fn test_a3_corrupted_signature_reports_signature_invalid() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// RFC 3161 §2.3 fitness is enforced in **both** trust modes, not only under path validation.
+///
+/// **Through ARCH Rev 1.27 the `AnchorEquality` arm performed no fitness check at all.** That
+/// made the mode this architecture calls "the stricter of the two" strictly *weaker* on the
+/// one axis RFC 3161 legislates: anchor equality is stricter about **identity** — it admits
+/// exactly one certificate — and said nothing about whether that certificate may stamp time.
+/// Pinning answers *which* certificate, never *whether it is a TSA certificate*.
+///
+/// **What this test reaches, and what it does not — stated because the gap is real.** It
+/// drives `rfc3161::signer_fitness`, the production function **both** arms call, against
+/// certificates that genuinely exhibit each defect. It does **not** drive a token end to end
+/// through the `AnchorEquality` arm, because a non-conformant TSA cannot be stood up on this
+/// host at all. Two independent obstacles, both observed:
+///
+///   1. `openssl ts` **refuses** to operate an authority whose signing certificate is
+///      non-conformant — "invalid signer certificate purpose" for all three certificates
+///      below. That is corroboration of §2.3 from the reference implementation at *signing*
+///      time, and it means no real non-conformant token exists to test with.
+///   2. `openssl cms -sign` produces a bundle wolfSSL's PKCS#7 verifier rejects regardless of
+///      certificate — confirmed by signing with a conformant `critical,timeStamping` cert and
+///      seeing the same rejection — so there is no alternative signer available here.
+///
+/// What remains unverified by any test is therefore the two-line wiring in that arm. It is
+/// verified by reading, and is recorded as the weaker kind of evidence rather than implied.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_anchor_equality_fitness_refuses_non_tsa_certificates() {
+    let dir = ca_dir();
+    for (name, want) in [
+        ("noteku", TimestampError::NotTimestampingCertificate),
+        ("noncrit", TimestampError::TimestampingEkuNotCritical),
+        ("both", TimestampError::TimestampingEkuNotExclusive),
+        ("anyeku", TimestampError::TimestampingEkuNotExclusive),
+    ] {
+        let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
+        let e = brokkr_audit::rfc3161::signer_fitness(&der)
+            .expect_err("a non-conformant signer certificate must be refused on fitness");
+        assert_eq!(e, want, "{name}");
+    }
+
+    // Control: the conformant leaf passes, so the test above is not passing because the
+    // function refuses everything.
+    let good = std::fs::read(dir.join("good.der")).expect("good");
+    assert!(
+        brokkr_audit::rfc3161::signer_fitness(&good).is_ok(),
+        "critical, exclusive timeStamping must pass fitness"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A conformant self-signed responder still verifies end to end under anchor equality.
+///
+/// This one *does* run a real token through the real `AnchorEquality` arm — `openssl ts` will
+/// happily operate a conformant authority — so it proves the arm still accepts what it should
+/// after gaining a fitness check. The refusal direction is covered by the test above.
+#[test]
+#[ignore = "live: needs openssl(1) and writes to a temp dir"]
+fn test_a3_anchor_equality_still_accepts_a_conformant_signer() {
+    let dir = tsa_dir();
+    let digest = Sha384Hasher.hash(b"a record");
+    let resp = respond(&dir, &build_request(&digest.bytes));
+    let token = extract_token(&resp).expect("extract");
+    let anchor = std::fs::read(dir.join("tsa.crt.der")).expect("anchor");
+
+    let client = brokkr_audit::Rfc3161Client::new(
+        "127.0.0.1:1",
+        "test",
+        brokkr_audit::SignerTrust::AnchorEquality { anchor_der: anchor },
+        std::time::Duration::from_secs(2),
+    );
+    assert!(
+        client.verify(&token).is_ok(),
+        "critical, exclusive timeStamping must still pass under equality — without this \
+         control, adding a fitness check could have broken every conformant token silently"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+
 /// Expired and not-yet-valid signers are reported as themselves.
 ///
 /// **These two mappings were "header only" until this test.** `openssl ca -startdate/

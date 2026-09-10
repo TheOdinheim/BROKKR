@@ -112,6 +112,25 @@ pub fn path_to_timestamp_error(e: PathError) -> TimestampError {
     }
 }
 
+/// RFC 3161 §2.3's certificate-fitness obligations: `id-kp-timeStamping`, carried
+/// **critically** and **exclusively**.
+///
+/// **Called by both trust modes**, because fitness is a property of the TSA certificate and
+/// not of how trust in it was established. Anchor equality answers *which* certificate;
+/// it says nothing about whether that certificate may stamp time, and through ARCH Rev 1.27
+/// that arm performed no fitness check at all.
+///
+/// `pub` so it is driven directly by tests. That is not merely convenient here — see the
+/// note in `test_a3_anchor_equality_fitness_refuses_non_tsa_certificates`: a non-conformant
+/// TSA **cannot be stood up on this host**, because `openssl ts` refuses to sign with such a
+/// certificate and wolfSSL's PKCS#7 verifier rejects `openssl cms -sign` bundles. This
+/// function is the largest part of that path a hermetic test can reach.
+pub fn signer_fitness(signer_cert_der: &[u8]) -> Result<(), TimestampError> {
+    brokkr_crypto::ffi::cert_timestamping_eku(signer_cert_der)
+        .and_then(|e| e.rfc3161_verdict())
+        .map_err(path_to_timestamp_error)
+}
+
 impl Rfc3161Client {
     /// Construct a client. `trust` selects the signer-trust mode; **`SignerTrust::
     /// AnchorEquality` is what a deployment gets unless it asks for path validation**,
@@ -131,16 +150,31 @@ impl Rfc3161Client {
     }
 
     /// Verify the token's CMS signature and make the trust decision over the certificate
-    /// that **actually** verified it.
-    fn verify(&self, token: &[u8]) -> Result<brokkr_crypto::ffi::VerifiedCms, TimestampError> {
+    /// that **actually** verified it — including RFC 3161 §2.3's certificate-fitness
+    /// obligations, in **both** trust modes.
+    ///
+    /// **`pub` for the same reason [`path_to_timestamp_error`] is:** a test that cannot call
+    /// the production trust decision ends up asserting against a restatement of it, which is
+    /// what CLAUDE.md §7 calls a circular audit. This is the function that decides whether a
+    /// token is acceptable; it is the function the tests should drive.
+    pub fn verify(
+        &self,
+        token: &[u8],
+    ) -> Result<brokkr_crypto::ffi::VerifiedCms, TimestampError> {
         let map_cms = |e: CmsError| match e {
             CmsError::Malformed => TimestampError::Malformed,
             CmsError::SignatureInvalid => TimestampError::SignatureInvalid,
         };
         match &self.trust {
-            // Equality: unchanged from Rev 1.25 — `cms_verify` pins internally.
+            // Equality: `cms_verify` pins internally. Through ARCH Rev 1.27 this arm did no
+            // fitness check at all, which made the "stricter" mode strictly weaker on the
+            // one axis RFC 3161 legislates: it would accept a pinned certificate that is not
+            // a timestamping certificate. Pinning answers *which* certificate; it says
+            // nothing about whether that certificate may stamp time.
             SignerTrust::AnchorEquality { anchor_der } => {
-                brokkr_crypto::ffi::cms_verify(token, anchor_der).map_err(map_cms)
+                let v = brokkr_crypto::ffi::cms_verify(token, anchor_der).map_err(map_cms)?;
+                signer_fitness(&v.used_cert)?;
+                Ok(v)
             }
             // Path validation: verify the signature, then subject the certificate wolfSSL
             // actually used to RFC 5280 path building against the configured root, plus the
@@ -153,6 +187,7 @@ impl Rfc3161Client {
                     brokkr_crypto::ffi::cms_verify_unpinned(token, root_der).map_err(map_cms)?;
                 brokkr_crypto::ffi::verify_cert_path(&v.used_cert, root_der, intermediates_der)
                     .map_err(path_to_timestamp_error)?;
+                // verify_cert_path already applies the EKU verdict; not repeated here.
                 Ok(v)
             }
         }
