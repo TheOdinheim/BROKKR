@@ -309,5 +309,8 @@ fn reason_for(condition: BarrierCondition) -> &'static str {
         BarrierCondition::PersonalDataUndeclared => {
             "personal data crossing without a matching declared Purpose and Retention"
         }
+        BarrierCondition::PersonalDataFieldOutOfScope => {
+            "the datum declares a field the signed policy does not permit its declared Purpose"
+        }
     }
 }

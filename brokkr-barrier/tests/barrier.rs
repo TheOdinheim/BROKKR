@@ -58,6 +58,7 @@ fn tag() -> PersonalDataTag {
         retention: RetentionPeriod {
             duration: Duration::from_secs(86_400),
         },
+        fields: Vec::new(),
     }
 }
 

@@ -189,6 +189,7 @@ impl Parts {
             invariants: self.policy_invariants,
             disallowed: self.policy_disallowed,
             signature: dummy_sig(),
+            purpose_fields: Vec::new(),
         };
         policy.signature = kp
             .sign_dual(&canonical::policy_signed_content(&policy))

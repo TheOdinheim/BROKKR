@@ -4,9 +4,7 @@
 use crate::capability::EgressProtocol;
 use crate::classification::{ChannelStrength, Classification, NamedGroup};
 use crate::crypto::DualSignature;
-use crate::ids::{
-    DatumRef, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp,
-};
+use crate::ids::{DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp};
 use crate::personal_data::{Purpose, RetentionPeriod};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -35,6 +33,16 @@ pub enum BarrierCondition {
     /// Personal data crossing without a matching declared Purpose/Retention in its BCR
     /// (condition 9, OQGF-P-11.3/P-11.4).
     PersonalDataUndeclared,
+    /// The datum declares a field the signed policy does not permit its declared `Purpose`
+    /// (OQGF-P-11.2).
+    ///
+    /// **Distinct from `PersonalDataUndeclared`, which means the opposite.** There, no
+    /// Purpose was declared at all; here the Purpose **is** declared and the data exceeds
+    /// it. Reporting an over-broad admission as an undeclared one would send an operator to
+    /// add a declaration that is already present — and because `finding_id()` scopes an
+    /// AMD-006 acceptance to `(datum, condition)`, a wrong condition scopes an acceptance
+    /// to the wrong thing.
+    PersonalDataFieldOutOfScope,
 }
 
 /// A still-visible finding attached to a deterministic `Deny` (OQGF-I-10). It is
@@ -68,6 +76,7 @@ fn condition_tag(c: BarrierCondition) -> &'static str {
         BarrierCondition::UnauthorizedDestination => "unauthorized-destination",
         BarrierCondition::ChannelStrengthCollapse => "channel-strength-collapse",
         BarrierCondition::PersonalDataUndeclared => "personal-data-undeclared",
+        BarrierCondition::PersonalDataFieldOutOfScope => "personal-data-field-out-of-scope",
     }
 }
 
@@ -205,6 +214,21 @@ pub struct PersonalDataTag {
     pub purpose: Purpose,
     /// The declared span it may be held, tied to the Purpose (OQGF-P-11.4).
     pub retention: RetentionPeriod,
+    /// The fields this datum carries, **declared by whoever assembled it** (OQGF-P-11.2).
+    ///
+    /// This is a declaration, not an observation: nothing reads content to derive it. The
+    /// barrier compares it against the field set the signed `PurposeFieldPolicy` permits
+    /// the declared `Purpose`, which is set containment over two declarations — the same
+    /// shape as classification, where a declared tier is enforced deterministically and a
+    /// heuristic sentinel flags suspected mislabelling without deciding anything.
+    ///
+    /// **It is signed twice over.** It sits inside `bcr_signed_content`, so a producer
+    /// cannot alter what a datum claims to carry without breaking the custody record; and,
+    /// because OQGF-I-13 requires every barrier decision recorded in Organ 5, it also sits
+    /// inside `record_signed_content` via `AuditEvent::BarrierCrossing` — so the audit
+    /// chain's hash linkage and generation signatures cover it as well
+    /// (GAP-2026-09-10-001).
+    pub fields: Vec<FieldName>,
 }
 
 /// A Boundary Custody Record — a bill of materials for data in transit, sibling to the

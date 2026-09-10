@@ -126,6 +126,8 @@ fn barrier_condition_tag(c: BarrierCondition) -> u8 {
         BarrierCondition::UnauthorizedDestination => 6,
         BarrierCondition::ChannelStrengthCollapse => 7,
         BarrierCondition::PersonalDataUndeclared => 8,
+
+        BarrierCondition::PersonalDataFieldOutOfScope => 9,
     }
 }
 
@@ -270,6 +272,16 @@ fn write_personal(c: &mut Canon, personal: &Option<PersonalDataTag>) {
 fn write_personal_tag(c: &mut Canon, tag: &PersonalDataTag) {
     write_purpose(c, &tag.purpose);
     write_retention(c, &tag.retention);
+    // OQGF-P-11.2 (Rev 1.29). NOTE: this encoder feeds `record_signed_content` via
+    // AuditEvent::BarrierCrossing -> write_flow -> write_personal, and via
+    // RecordedInput::Shredded — so this field is inside the audit chain's linkage digest,
+    // not only the BCR signature. GAP-2026-09-10-001 corrects Rev 1.29 §6.5, which stated
+    // the opposite. Zero cost today (SAGA is in-memory, no persisted chain); not zero once
+    // SAGA persists.
+    c.u64(tag.fields.len() as u64);
+    for f in &tag.fields {
+        c.bytes(f.as_str().as_bytes());
+    }
 }
 
 fn write_destination_class(c: &mut Canon, d: &DestinationClass) {

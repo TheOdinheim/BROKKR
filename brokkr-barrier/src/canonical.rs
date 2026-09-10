@@ -94,6 +94,12 @@ fn write_personal(c: &mut Canon, personal: &Option<PersonalDataTag>) {
             c.u8(1);
             write_purpose(c, &tag.purpose);
             write_retention(c, &tag.retention);
+            // OQGF-P-11.2 (Rev 1.29). Length-prefixed then each name, so a field list is
+            // unambiguous and cannot be confused with a differently-split one.
+            c.u64(tag.fields.len() as u64);
+            for f in &tag.fields {
+                c.bytes(f.as_str().as_bytes());
+            }
         }
     }
 }

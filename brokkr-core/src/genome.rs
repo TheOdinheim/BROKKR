@@ -11,11 +11,9 @@
 use crate::capability::ConformanceTier;
 use crate::classification::{Classification, NamedGroup};
 use crate::crypto::{Digest, DualSignature, HashAlg, KemAlg, SignatureAlg};
-use crate::ids::{
-    ClientCertRef, Dap, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp,
-    ToolId, TrustAnchor,
-};
+use crate::ids::{ClientCertRef, Dap, FieldName, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp, ToolId, TrustAnchor};
 use crate::intent::{Capability, Invariant};
+use crate::personal_data::Purpose;
 use crate::tolerance::ResponseClass;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -413,6 +411,22 @@ pub struct InvariantEntry {
     pub forbids_privilege: Vec<PrivilegeClass>,
 }
 
+/// The field set a declared [`Purpose`] is permitted to admit (OQGF-P-11.2).
+///
+/// A closed vocabulary for the same reason `PolicyRegister::capabilities` is one (Rev 1.5):
+/// `FieldName` is an open string newtype, so without a declared set nothing distinguishes
+/// `dob` from `bod`, and a typo becomes a silently permanent refusal rather than a loud
+/// promotion failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurposeFieldPolicy {
+    /// Matched against the `Purpose` declared on a crossing.
+    pub purpose: Purpose,
+    /// The closed set of fields this purpose may admit. **An empty set means this purpose
+    /// may admit no fields** — a datum declaring none passes containment vacuously, and any
+    /// declared field is refused.
+    pub allowed: Vec<FieldName>,
+}
+
 /// The signed policy register (OQGF-G-8 policy-as-code; OQGF-G-4 disallow-list; OQGF-M-10
 /// invariants; Rev 1.4). Types only in this revision — the promotion gate that evaluates
 /// `disallowed` and the construction-time invariant check are Phase 5.
@@ -427,6 +441,20 @@ pub struct PolicyRegister {
     /// against it; this revision places the field only.
     pub capabilities: Vec<Capability>,
     pub invariants: Vec<InvariantEntry>,
+    /// The field set each declared `Purpose` may admit (OQGF-P-11.2, ARCH Rev 1.29 §6.5).
+    ///
+    /// **Here rather than on `Purpose`, and that is the security argument, not a modelling
+    /// preference.** A `Purpose` travels *on the crossing* inside the BCR. If the allowed
+    /// set travelled with it, the party assembling the data would declare both the fields
+    /// it is admitting **and** the fields it may admit — a producer's claim checked against
+    /// the same producer's claim, which is the circular shape §7 names and the defect
+    /// Rev 1.22 refused when it declined a caller-supplied tier for `promote`: **the thing
+    /// being governed does not supply the terms of its own governance.**
+    ///
+    /// Minimization is a DAP judgment made in advance, not a computation: whether a field
+    /// is *necessary* for a purpose is answerable only from why the data is collected. The
+    /// gate does not determine necessity — it holds a declaration to what was signed.
+    pub purpose_fields: Vec<PurposeFieldPolicy>,
     /// Algorithms that fail the promotion gate (OQGF-G-4). Typed identifiers, never
     /// strings (OQGF-G-5).
     pub disallowed: Vec<AlgorithmId>,

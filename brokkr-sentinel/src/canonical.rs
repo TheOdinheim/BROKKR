@@ -101,6 +101,7 @@ fn barrier_condition_tag(c: BarrierCondition) -> u8 {
         BarrierCondition::UnauthorizedDestination => 6,
         BarrierCondition::ChannelStrengthCollapse => 7,
         BarrierCondition::PersonalDataUndeclared => 8,
+        BarrierCondition::PersonalDataFieldOutOfScope => 9,
     }
 }
 

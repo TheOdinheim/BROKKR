@@ -43,6 +43,11 @@ string_id! {
     OriginId,
     /// Identity of a Deterministic-Gate finding an acceptance is scoped to (OQGF-P-9.2).
     FindingId,
+    /// A named field of a personal datum (OQGF-P-11.2, ARCH Rev 1.29 §6.5). Declared on
+    /// a crossing (`PersonalDataTag::fields`) and permitted by the signed
+    /// `PurposeFieldPolicy`; the check is set containment over the two **declarations**,
+    /// never an inspection of content.
+    FieldName,
 }
 
 /// Epoch milliseconds. Substitutes `std::time::SystemTime` for `no_std`.
