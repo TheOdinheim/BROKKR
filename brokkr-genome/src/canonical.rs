@@ -388,6 +388,13 @@ fn write_vendor_trust_score(c: &mut Canon, v: &VendorTrustScore) {
     write_score(c, v.jurisdictional_exposure);
     write_score(c, v.data_handling);
     write_score(c, v.reconciliation_pass_rate);
+    // OQGF-M-6 evidence (Rev 1.31). This moves `endpoints_signed_content` and therefore
+    // `genome_signed_content`: both the endpoints-register signature and the genome
+    // signature are recomputed. It does NOT move the audit chain — `GenomePromotion`
+    // carries only `version` and the *declared* `corpus_digest`, neither derived from a
+    // register encoding (traced per the Rev 1.29 lesson, GAP-2026-09-10-001).
+    c.u64(v.evidence.observations);
+    c.u64(v.evidence.measured.0);
     c.u64(v.reviewed.0);
     write_dap(c, &v.reviewer);
     // The trust score carries its own signature; the endpoint register commits to it as

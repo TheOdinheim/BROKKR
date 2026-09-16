@@ -6,12 +6,7 @@
 use brokkr_core::capability::ConformanceTier;
 use brokkr_core::classification::{Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
-use brokkr_core::genome::{
-    Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl,
-    EndpointRegistry, ExtractionProtection, FipsValidation, Genome, HardwareBoundary,
-    InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass, ProcedureRef,
-    Quorum, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, ToolSchema, VendorTrustScore,
-};
+use brokkr_core::genome::{Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl, EndpointRegistry, ExtractionProtection, FactorEvidence, FipsValidation, Genome, HardwareBoundary, InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass, ProcedureRef, Quorum, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, ToolSchema, VendorTrustScore};
 use brokkr_core::ids::{
     ClientCertRef, Dap, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp,
     ToolId, TrustAnchor,
@@ -92,6 +87,14 @@ fn endpoint(id: &str, reviewed: u64) -> ModelEndpoint {
             jurisdictional_exposure: Score(50),
             data_handling: Score(60),
             reconciliation_pass_rate: Score(0),
+            // Rev 1.31 — the honest encoding of "unmeasured": Score(0) with zero
+            // observations. Predicate 8 passes this and refuses the inverse (a non-zero
+            // score with zero observations), so the fixture exercises the state BROKKR's
+            // own genome is actually in.
+            evidence: FactorEvidence {
+                observations: 0,
+                measured: Timestamp(0),
+            },
             reviewed: Timestamp(reviewed),
             reviewer: dap(),
             signature: dummy_sig(),

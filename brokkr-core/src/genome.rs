@@ -289,6 +289,38 @@ pub struct Aibom {
     pub signature: DualSignature,
 }
 
+/// Evidence behind a **measured** factor of a [`VendorTrustScore`] (OQGF-M-6; ARCH Rev 1.31).
+///
+/// [`Score`] is a `u8` in `0..=100` where higher is better, so it **has no value meaning
+/// "unmeasured"** — `Score(0)` is the *worst* score, not a neutral one. This says it instead.
+///
+/// **The correct instinct is already committed one crate away.** `window_rate`
+/// (`brokkr-sentinel`) returns `NaN` rather than `0.0` for an empty window, because *"a rate
+/// of `0.0` would claim safety from none."* The host-harm rate can say "no evidence"; a trust
+/// score could not. This carries that distinction into a register where the value is **signed**
+/// rather than computed on demand.
+///
+/// **`Option<Score>` was refused.** It makes absence representable while saying nothing about
+/// *how much* evidence a present score rests on: `Some(Score(100))` from one observation and
+/// from ten thousand are indistinguishable, and the first is the more dangerous.
+///
+/// **`Score(0)` paired with `observations: 0` is the honest encoding of "unmeasured"** — the
+/// pair, not either half, carries the meaning. That is `reconciliation_pass_rate`'s true state
+/// today (ARCH §6.2): the input is degenerate, so no counter is built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactorEvidence {
+    /// Reconciliation outcomes the score was computed over. **Zero means unmeasured**, and
+    /// promotion-gate predicate 8 refuses a genome whose measured factor claims evidence it
+    /// has none of.
+    pub observations: u64,
+    /// When the measurement window closed.
+    ///
+    /// **Deliberately distinct from [`VendorTrustScore::reviewed`]**, which is when a DAP
+    /// *reviewed the score*. A review can restate an old measurement, and conflating the two
+    /// would let a fresh review launder stale evidence.
+    pub measured: Timestamp,
+}
+
 /// A per-supplier trustworthiness score (OQGF-M-6). Distinct from OQGF-R-2
 /// substitutability: a provider you can switch away from may still be one you
 /// should not send source to. A stale score fails the promotion gate.
@@ -305,6 +337,11 @@ pub struct VendorTrustScore {
     /// placeholder, so **M-6 stays PARTIAL** — the factor is present in shape, not yet
     /// sourced from measurement. The type is necessary, not sufficient.
     pub reconciliation_pass_rate: Score,
+    /// Evidence behind the **measured** factor above (OQGF-M-6; Rev 1.31). `observations: 0`
+    /// means `reconciliation_pass_rate` is unmeasured rather than measured at zero — a
+    /// distinction `Score` alone cannot express, and the one promotion-gate predicate 8
+    /// enforces.
+    pub evidence: FactorEvidence,
     pub reviewed: Timestamp,
     pub reviewer: Dap,
     pub signature: DualSignature,

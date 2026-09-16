@@ -17,7 +17,7 @@ use brokkr_core::classification::{
     ChannelStrength, Classification, NamedGroup, effective_authorization,
 };
 use brokkr_core::gate::{Action, AnergyReason, AuthorizationDecision, CostimulationGate};
-use brokkr_core::genome::{ModelEndpoint, VendorTrustScore};
+use brokkr_core::genome::{FactorEvidence, ModelEndpoint, VendorTrustScore};
 use brokkr_core::ids::{
     ClientCertRef, CorpusVersion, DatumRef, DetectorId, EscalationId, GrantId, IncidentId,
     ModelEndpointId, ModelIdentity, Score, SelfSetVersion, Timestamp, ToolId, TrustAnchor,
@@ -518,6 +518,13 @@ fn trust_score() -> VendorTrustScore {
         // Rev 1.4 M-6 fifth factor. Declared placeholder — measured by HEIMDALL (Phase 8),
         // so it carries a placeholder here, matching the type's PARTIAL status.
         reconciliation_pass_rate: Score(0),
+        // Rev 1.31 — the honest encoding of "unmeasured": Score(0) paired with zero
+        // observations. `Score(0)` alone would assert a measured 0% pass rate, the worst
+        // value obtainable, from no evidence at all.
+        evidence: FactorEvidence {
+            observations: 0,
+            measured: Timestamp(0),
+        },
         reviewed: Timestamp(1),
         reviewer: dap(),
         signature: dual_sig(),
