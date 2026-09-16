@@ -9,7 +9,7 @@
 
 use brokkr_core::capability::ConformanceTier;
 use brokkr_core::genome::AlgorithmId;
-use brokkr_core::ids::{ModelEndpointId, ToolId};
+use brokkr_core::ids::{ModelEndpointId, Score, ToolId};
 use brokkr_core::intent::{Capability, Invariant};
 
 /// Which of the six signed registers a signature-verification finding refers to.
@@ -50,6 +50,19 @@ pub enum Finding {
     },
     /// Predicate 6: an invariant forbids nothing at all (a predicate that can never fire).
     InvariantForbidsNothing { invariant: Invariant },
+    /// Predicate 8 (Rev 1.31): a **measured** factor claims a value it has no evidence
+    /// for — `reconciliation_pass_rate` is non-zero while `evidence.observations` is 0.
+    ///
+    /// **Not the inverse.** An honestly *unmeasured* factor — `Score(0)` with zero
+    /// observations — is promotable, and must be: BROKKR's own genome is in exactly that
+    /// state. A gate refusing the honest state and admitting the dishonest one would be
+    /// precisely backwards, and this predicate is one line away from being that gate.
+    MeasuredFactorWithoutEvidence {
+        endpoint: ModelEndpointId,
+        /// The score claimed, carried so a blocked report says *what* was claimed rather
+        /// than only that something was.
+        claimed: Score,
+    },
     /// Predicate 7 (Rev 1.21/1.22): the declared key custody does not meet the AMD-018
     /// obligation for the genome's declared conformance tier. Carries the tier and the
     /// specific element that failed, so a blocked report says *which* of R-6.2's or

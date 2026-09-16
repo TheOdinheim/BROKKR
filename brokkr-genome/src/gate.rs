@@ -44,6 +44,7 @@ pub fn promote(genome: &Genome, dap_key: &DualPublicKey, now: Timestamp) -> Prom
     check_tool_capabilities(genome, &mut findings); // predicate 5
     check_invariant_wellformedness(genome, &mut findings); // predicate 6
     check_key_custody_tier(genome, now, &mut findings); // predicate 7
+    check_measured_factor_evidence(genome, &mut findings); // predicate 8
 
     if findings.is_empty() {
         PromotionVerdict::Promoted
@@ -149,6 +150,31 @@ fn check_trust_score_staleness(g: &Genome, now: Timestamp, findings: &mut Vec<Fi
         } else if now.0.saturating_sub(reviewed) > NINETY_DAYS_MS {
             findings.push(Finding::StaleTrustScore {
                 endpoint: ep.id.clone(),
+            });
+        }
+    }
+}
+
+/// Predicate 8 (Rev 1.31) — a **measured** factor is supported by evidence.
+///
+/// Refuses a genome whose `reconciliation_pass_rate` is non-zero while
+/// `evidence.observations` is 0: **a factor claiming a measurement it has no observations
+/// behind.** `Score` is a `u8` that cannot say "unmeasured", so the pair — score and
+/// observation count — is what carries the meaning.
+///
+/// **The direction is the whole of its safety.** It does **not** refuse an unmeasured
+/// factor: `Score(0)` with zero observations is the honest encoding of "no evidence", and
+/// **BROKKR's own genome is in exactly that state and must stay promotable.** A gate that
+/// refused the honest state and admitted the dishonest one would be precisely backwards,
+/// and this predicate is one line away from being that gate — which is why both directions
+/// carry a test.
+fn check_measured_factor_evidence(g: &Genome, findings: &mut Vec<Finding>) {
+    for ep in &g.endpoints.endpoints {
+        let score = ep.trust_score.reconciliation_pass_rate;
+        if score.0 != 0 && ep.trust_score.evidence.observations == 0 {
+            findings.push(Finding::MeasuredFactorWithoutEvidence {
+                endpoint: ep.id.clone(),
+                claimed: score,
             });
         }
     }

@@ -346,6 +346,77 @@ fn test_oqgf_m_6_stale_trust_score_blocks() {
     }));
 }
 
+/// Predicate 8 — a factor claiming a measurement it has no evidence for is refused.
+///
+/// `Score` is a `u8` that cannot say "unmeasured", so a non-zero score with zero
+/// observations is a **claim without evidence**: signed into the genome, dated,
+/// DAP-attributed, read by the OQGF-G-4 gate, and indistinguishable at assessment from a
+/// real measurement. ARCH §6.2 records why that is worse than an inert placeholder.
+#[test]
+fn test_oqgf_m_6_measured_factor_without_evidence_blocks() {
+    let mut kp = DualKeyPair::generate().unwrap();
+    let mut parts = Parts::default_valid();
+    let mut ep = endpoint("mimir-1", NOW - 1000);
+    // A claimed measurement...
+    ep.trust_score.reconciliation_pass_rate = Score(100);
+    // ...with nothing behind it.
+    ep.trust_score.evidence.observations = 0;
+    parts.endpoints = vec![ep];
+    let genome = parts.sign(&mut kp);
+    let findings = blocked_findings(promote(&genome, &public_of(&kp), Timestamp(NOW)));
+    assert!(
+        findings.contains(&Finding::MeasuredFactorWithoutEvidence {
+            endpoint: ModelEndpointId::new("mimir-1"),
+            claimed: Score(100),
+        }),
+        "a non-zero score with zero observations must be refused: {findings:?}"
+    );
+}
+
+/// Predicate 8 — an **honestly unmeasured** factor promotes, and this is the direction that
+/// matters most.
+///
+/// `Score(0)` with zero observations is the honest encoding of "no evidence", and **BROKKR's
+/// own genome is in exactly that state**. A predicate that refused it would make BROKKR
+/// unpromotable by its own gate — the failure mode predicate 8 is one line away from, and
+/// the reason this test exists beside the refusal above rather than being left implied.
+#[test]
+fn test_oqgf_m_6_unmeasured_factor_still_promotes() {
+    let mut kp = DualKeyPair::generate().unwrap();
+    let mut parts = Parts::default_valid();
+    let mut ep = endpoint("mimir-1", NOW - 1000);
+    ep.trust_score.reconciliation_pass_rate = Score(0);
+    ep.trust_score.evidence.observations = 0;
+    parts.endpoints = vec![ep];
+    let genome = parts.sign(&mut kp);
+    let verdict = promote(&genome, &public_of(&kp), Timestamp(NOW));
+    assert!(
+        matches!(verdict, PromotionVerdict::Promoted),
+        "the honest unmeasured state must stay promotable — a gate refusing it would make \
+         BROKKR's own genome unpromotable: {verdict:?}"
+    );
+}
+
+/// Predicate 8 — a measured factor **with** evidence promotes.
+///
+/// The control. Without it the refusal test would pass equally against a predicate that
+/// refused every non-zero score, which is a different and wrong rule.
+#[test]
+fn test_oqgf_m_6_measured_factor_with_evidence_promotes() {
+    let mut kp = DualKeyPair::generate().unwrap();
+    let mut parts = Parts::default_valid();
+    let mut ep = endpoint("mimir-1", NOW - 1000);
+    ep.trust_score.reconciliation_pass_rate = Score(97);
+    ep.trust_score.evidence.observations = 4_000;
+    parts.endpoints = vec![ep];
+    let genome = parts.sign(&mut kp);
+    let verdict = promote(&genome, &public_of(&kp), Timestamp(NOW));
+    assert!(
+        matches!(verdict, PromotionVerdict::Promoted),
+        "a score backed by observations must promote: {verdict:?}"
+    );
+}
+
 #[test]
 fn test_oqgf_m_6_future_trust_score_blocks() {
     let mut kp = DualKeyPair::generate().unwrap();
