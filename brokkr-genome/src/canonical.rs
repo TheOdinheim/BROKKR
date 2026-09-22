@@ -397,9 +397,6 @@ fn write_vendor_trust_score(c: &mut Canon, v: &VendorTrustScore) {
     c.u64(v.evidence.measured.0);
     c.u64(v.reviewed.0);
     write_dap(c, &v.reviewer);
-    // The trust score carries its own signature; the endpoint register commits to it as
-    // data (it is not one of the six register signatures the gate verifies separately).
-    write_dual_signature(c, &v.signature);
 }
 
 fn write_model_endpoint(c: &mut Canon, e: &ModelEndpoint) {

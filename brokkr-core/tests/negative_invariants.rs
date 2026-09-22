@@ -527,7 +527,6 @@ fn trust_score() -> VendorTrustScore {
         },
         reviewed: Timestamp(1),
         reviewer: dap(),
-        signature: dual_sig(),
     }
 }
 

@@ -26,8 +26,10 @@ fn dap() -> Dap {
     Dap::new("Jeremy Rose", "dap-1")
 }
 
-/// A never-verified placeholder signature (used where a signature is data the gate does
-/// not check — the vendor trust score's own signature — and as a pre-signing placeholder).
+/// A never-verified placeholder signature, used only as a pre-signing placeholder: a
+/// register is built carrying this, then re-assigned a real signature over its own
+/// canonical content. (Before Rev 1.32 it also filled `VendorTrustScore::signature`, a
+/// field nothing signed and nothing verified; that field is removed.)
 fn dummy_sig() -> DualSignature {
     DualSignature {
         lattice: Signature {
@@ -97,7 +99,6 @@ fn endpoint(id: &str, reviewed: u64) -> ModelEndpoint {
             },
             reviewed: Timestamp(reviewed),
             reviewer: dap(),
-            signature: dummy_sig(),
         },
     }
 }

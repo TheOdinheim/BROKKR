@@ -344,7 +344,11 @@ pub struct VendorTrustScore {
     pub evidence: FactorEvidence,
     pub reviewed: Timestamp,
     pub reviewer: Dap,
-    pub signature: DualSignature,
+    // No `signature` (removed Rev 1.32, GAP-2026-09-18-001). The score's tamper-evidence
+    // and DAP attribution come from the endpoints register that carries it: this whole
+    // struct is inside `endpoints_signed_content`, whose signature promotion-gate
+    // predicate 2 verifies against the DAP root. A field here would have been a second
+    // attestation with no signed content defined for it and no verification site.
 }
 
 /// A model endpoint BROKKR is permitted to speak to.
