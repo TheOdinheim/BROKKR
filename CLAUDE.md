@@ -1,10 +1,10 @@
 # CLAUDE.md — BROKKR Build Rules
 
 **Document ID:** BROKKR-RULES-2026-001
-**Version:** 1.10
+**Version:** 1.11
 **Repository:** BROKKR — the governed autonomous coding agent
 **Designated Accountable Party (DAP):** Jeremy Rose, CEO — Odin's LLC
-**Date:** 7 September 2026
+**Date:** 22 September 2026
 **Status:** Operative. These rules bind every build action in this repository.
 
 ---
@@ -290,6 +290,31 @@ The revision carried a verification note stating what had been checked before dr
 
 **Naming a pattern does not prevent repeating it.** Rev 1.21's own change log enumerated three prior instances of this exact defect — Rev 1.4's predicate 5 against a capability vocabulary that did not exist (GAP-2026-07-27-001), Rev 1.6's egress rule against personal data the flow could not see, Rev 1.7's acceptance machinery against a barrier finding with no identity (GAP-2026-07-30-001) — **and then committed the fourth, in the same document, by the same party, under a verification note claiming the check was done.** Awareness was at its maximum and was not sufficient. That is the whole argument for placing this as a checked rule rather than trusting anyone, including a future reader of this paragraph, to remember it.
 
+### 5.5 The document-integrity check — mandatory before a drafted revision is reported
+
+**When drafting a revision of a placed document — the architecture, `CLAUDE.md`, a gap report, or an index — the builder SHALL NOT remove, alter, or reorder any content outside the scope the brief authorizes.** A brief that names the sections to change authorizes changes *to those sections*; it does not authorize the absence of the rest.
+
+**Before reporting a draft, the builder SHALL diff it against the placed source and report every hunk, labelled by the section the hunk falls in.** Any hunk outside the authorized scope is a **defect**: stop and report it. Do not repair it silently — a draft that lost content and was quietly re-made is indistinguishable, in the record, from one that never lost it.
+
+**The verification is the diff against the source. It is never a check of what the draft contains.** This is the load-bearing sentence of the section, and it is a statement about the *direction* of the check rather than its thoroughness. A check of what survived **passes by construction when content is lost**: the sections that remain are intact, their headings are present, their text matches, and every assertion about them is true. Nothing in an inventory of the surviving material can report the missing material, because the missing material is not in the inventory being inspected.
+
+**Heading counts and line counts are reported as actual command output, alongside the diff — never as a statement that they passed.** *"Headings present"* and *"verbatim match"* are conclusions; `wc -l` on both files and a heading list from both files are evidence. A count reported without the source's count beside it is a number with nothing to be wrong against, and §7 already forbids the general form of this: **the builder's own summary is not evidence.**
+
+**Why this section exists, and why it is a rule when the recommendation in GAP-2026-09-18-001 was declined in the same version.**
+
+Both concern a builder's verification of its own work, and only one of them describes a gap that the existing practice leaves open. **The declined rule — that a revision asserting a consequence about committed code name the file and symbol it checked — duplicated Step 0**, which already grounds a placed design against the tree and which caught GAP-2026-09-07-001, -09-08-001, -09-10-001, -09-15-001, and -09-18-001. A rule that duplicates a working practice adds a box to tick and does not add a check.
+
+**This failure got past Step 0 twice.**
+
+- **Architecture Rev 1.31 lost §14** while drafting. It was caught after the fact.
+- **Architecture Rev 1.32 lost §1 through §14** — every section the brief did not name — and was reported as complete, with a line count of 931 against a 3,688-line source and no remark on the ratio.
+
+**In both cases the builder's own verification was real, was run, and checked the wrong direction.** Rev 1.32's checks were a byte-identity comparison of §15 against the source, a labelled diff of §6.2 showing exactly the two intended edits, a heading list, and a scan for draft language. **Every one of those passed, every one was honest, and not one of them could have failed** — because each inspected material that was present in the draft. The absent thirteen sections were absent from the checks for the same reason they were absent from the document.
+
+**And the safeguard placed after the first instance did not survive into the second.** Rev 1.31's loss produced a stated remedy — assert the H2 count after every edit — recorded in that session's report. **A session does not import another session's report.** It imports `CLAUDE.md`. A practice written where the next builder will not read it is not a control; it is a note about a control that once existed.
+
+**That is the gap this rule fills, and it is the reason it is not ceremony.** Step 0 checks whether a claim about the tree is supported. It has nothing to say about whether a document the builder is assembling still contains what it contained an hour ago. **No rule in this file, before this one, required a builder to compare its output against its input**, and the same defect therefore recurred with the pattern named, the remedy known, and awareness at its maximum — which is precisely the argument §5.4 makes for its own existence.
+
 ---
 
 ## 6. Code standards
@@ -428,6 +453,19 @@ This rule adds a constraint and relaxes nothing, so it is a permitted auto-draft
 ---
 
 ## 12. Change log
+
+**v1.11 — 22 September 2026.** Places **§5.5, the document-integrity check**, and records the **decline** of the rule recommended at Architecture Rev 1.30 §6.5 and carried in GAP-2026-09-18-001 §7. One addition, one recorded refusal; nothing relaxed, no invariant added, no verdict changed.
+
+- **§5.5 — when drafting a revision of a placed document, the builder SHALL NOT remove, alter, or reorder content outside the scope the brief authorizes.** Before reporting a draft, the builder SHALL **diff it against the placed source** and report every hunk labelled by its section. A hunk outside the authorized scope is a defect: **stop and report it; do not repair it silently**, because a loss that was quietly re-made is indistinguishable in the record from one that never happened.
+- **The direction of the check is the whole of the rule.** The verification is the diff against the source, **never a check of what the draft contains.** A check of what survived **passes by construction when content is lost** — the surviving sections are intact, their headings are present, their text matches, and nothing in an inventory of what remains can report what does not. Heading and line counts are reported as **actual command output from both files**, never as a statement that they passed; a count without the source's count beside it has nothing to be wrong against, which is §7's rule that the builder's own summary is not evidence, applied to the builder's own document.
+- **Two instances, both past Step 0.** **Architecture Rev 1.31 lost §14** while drafting, caught after the fact. **Architecture Rev 1.32 lost §1 through §14** — every section its brief did not name — and was **reported as complete**, at 931 lines against a 3,688-line source, with no remark on the ratio.
+- **The verification that missed it was real, was run, and pointed the wrong way.** Rev 1.32's draft was checked by a byte-identity comparison of §15 against the source, a labelled diff of §6.2 showing exactly the two intended edits, a heading list, and a scan for draft language. **Every check passed, every check was honest, and not one of them could have failed**, because each inspected material present in the draft.
+- **The first instance's safeguard did not reach the second session.** Rev 1.31's loss produced a stated remedy — assert the H2 count after every edit — **recorded in that session's report.** A session imports `CLAUDE.md`; it does not import another session's report. **A practice written where the next builder will not read it is a note about a control, not a control** — and that is exactly the gap a rule fills.
+- **Why this is a rule and the GAP-2026-09-18-001 recommendation is not.** That recommendation — *a revision asserting a consequence about committed code names the file and symbol it checked* — **duplicated Step 0**, which already grounds a placed design against the tree and which caught GAP-2026-09-07-001, -09-08-001, -09-10-001, -09-15-001, and -09-18-001 itself. **A rule that duplicates a working practice adds a box to tick and does not add a check**, and §12.1's argument applies with equal force: a rule enforcing the *presence of a claim*, while the claim's truth lives where the rule cannot see it, teaches a reader that the rule set covers something it does not. **§5.5 duplicates nothing**: Step 0 asks whether a claim about the tree is supported and has nothing to say about whether a document still contains what it contained an hour ago. **No rule in this file, before this one, required a builder to compare its output against its input.**
+- **The recommendation is declined on the record, not left to lapse.** Its text is preserved verbatim at Architecture Rev 1.30 §6.5 (*"Recommended, not placed"*, which remains true) and in GAP-2026-09-18-001 §7, which records the argument for and against at equal length. **Nothing is deleted** (§8), and a future reader sees a considered refusal rather than an idea that evaporated. It may be revisited if a consequence-claim error recurs after a Step-0 check that did not catch it.
+- **Labelled per §4, and it runs against the builder's interest.** **§5.5 costs the builder a full diff of every document revision it drafts, against the placed source, with every hunk labelled — on every revision, forever.** The declined rule would have cost a named-evidence line; this costs a diff and the reading of it. Neither recording is a saving, and the one being placed is the more expensive of the two.
+
+**What this version does not change.** No structural invariant, no code standard, no hard-list item, no conformance verdict, and no phase. §5.5 adds a check to existing practice and forbids nothing that was previously permitted except reporting a drafted revision without having diffed it against its source. OQGF-R-6.2 remains **ABSENT**; this rule prevents a class of drafting defect and closes no requirement.
 
 **v1.10 — 7 September 2026.** Places **§5.4, the reachability check**, aligning to Architecture Rev 1.22 (which disposes GAP-2026-09-07-001). One addition; nothing relaxed, no invariant added, no verdict changed.
 
