@@ -54,8 +54,7 @@ pub use event::{
     AuditEvent, AuditRecord, AuthorizationOutcome, AuthorizationRecord, BarrierCrossing,
     CryptoGeneration, ErasureTombstone, GenerationSignature, GenomePromotion, ProposalRecord,
     RecordedInput, SignerTrust, TimestampAuthority, TimestampError, TimestampSigAlg,
-    TimestampToken,
-    Timestamping,
+    TimestampToken, Timestamping,
 };
 pub use rfc3161::Rfc3161Client;
 pub use saga::{ChainStatus, Saga, SagaError, SignedExport, SubjectDatum};

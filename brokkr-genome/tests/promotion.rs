@@ -6,7 +6,13 @@
 use brokkr_core::capability::ConformanceTier;
 use brokkr_core::classification::{Classification, NamedGroup};
 use brokkr_core::crypto::{Digest, DualSignature, HashAlg, Signature, SignatureAlg};
-use brokkr_core::genome::{Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl, EndpointRegistry, ExtractionProtection, FactorEvidence, FipsValidation, Genome, HardwareBoundary, InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass, ProcedureRef, Quorum, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, ToolSchema, VendorTrustScore};
+use brokkr_core::genome::{
+    Aibom, AlgorithmId, BoundaryInterface, Cbom, CustodianSeparation, DualControl,
+    EndpointRegistry, ExtractionProtection, FactorEvidence, FipsValidation, Genome,
+    HardwareBoundary, InvariantEntry, KeyCustody, ModelEndpoint, PolicyRegister, PrivilegeClass,
+    ProcedureRef, Quorum, RootOfTrustEntry, RootsOfTrust, ToolEntry, ToolGenome, ToolSchema,
+    VendorTrustScore,
+};
 use brokkr_core::ids::{
     ClientCertRef, Dap, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp,
     ToolId, TrustAnchor,

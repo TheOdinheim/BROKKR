@@ -63,7 +63,7 @@
 pub mod mtls;
 pub use mtls::{GatewayConfig, MtlsTransport, Negotiated, TransportError, map_group};
 
-use brokkr_barrier::{PurposeFieldResolver, AcceptanceResolver, EndpointCeiling, Huth};
+use brokkr_barrier::{AcceptanceResolver, EndpointCeiling, Huth, PurposeFieldResolver};
 use brokkr_core::barrier::{Barrier, BarrierVerdict, BoundaryFlow, Destination};
 use brokkr_core::classification::{
     ChannelStrength, Classification, NamedGroup, effective_authorization,
@@ -145,7 +145,13 @@ impl<C: EndpointCeiling + Clone, A: AcceptanceResolver, F: PurposeFieldResolver>
         purpose_fields: F,
     ) -> Self {
         Bifrost {
-            huth: Huth::new(bcr_key, dap_key, ceiling.clone(), acceptances, purpose_fields),
+            huth: Huth::new(
+                bcr_key,
+                dap_key,
+                ceiling.clone(),
+                acceptances,
+                purpose_fields,
+            ),
             ceiling,
         }
     }

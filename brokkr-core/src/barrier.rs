@@ -4,7 +4,10 @@
 use crate::capability::EgressProtocol;
 use crate::classification::{ChannelStrength, Classification, NamedGroup};
 use crate::crypto::DualSignature;
-use crate::ids::{DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp};
+use crate::ids::{
+    DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath,
+    RiskAcceptanceId, Timestamp,
+};
 use crate::personal_data::{Purpose, RetentionPeriod};
 use alloc::string::String;
 use alloc::vec::Vec;

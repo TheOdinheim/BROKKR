@@ -248,31 +248,30 @@ impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Huth<C,
                 if matches!(context, ContextClass::Privileged)
                     && let Some(tag) = personal.as_ref()
                 {
-                        // The classification comes from the BCR: `Ingress` carries none, and
-                        // conditions 10/11 are reached only once provenance is established,
-                        // so `b` exists. (Recorded in GAP-2026-09-10-001 §5.)
-                        let deny = |condition| BarrierVerdict::Deny {
-                            finding: BarrierFinding {
-                                datum: datum.clone(),
-                                condition,
-                                classification: b.classification,
-                                reason: String::from(reason_for(condition)),
-                            },
-                        };
-                        // 10 — an undeclared purpose has no allowed set, so nothing is
-                        // within its scope. `None` refuses; permitting would let the
-                        // control be removed by declaring an unregistered purpose.
-                        let Some(allowed) = self.purpose_fields.allowed_fields(&tag.purpose)
-                        else {
-                            return deny(BarrierCondition::PersonalDataFieldOutOfScope);
-                        };
-                        // 11 — every declared field must appear in the allowed set. An
-                        // empty allowed set admits a datum declaring no fields (vacuous)
-                        // and refuses any declared field.
-                        if !tag.fields.iter().all(|f| allowed.contains(f)) {
-                            return deny(BarrierCondition::PersonalDataFieldOutOfScope);
-                        }
+                    // The classification comes from the BCR: `Ingress` carries none, and
+                    // conditions 10/11 are reached only once provenance is established,
+                    // so `b` exists. (Recorded in GAP-2026-09-10-001 §5.)
+                    let deny = |condition| BarrierVerdict::Deny {
+                        finding: BarrierFinding {
+                            datum: datum.clone(),
+                            condition,
+                            classification: b.classification,
+                            reason: String::from(reason_for(condition)),
+                        },
+                    };
+                    // 10 — an undeclared purpose has no allowed set, so nothing is
+                    // within its scope. `None` refuses; permitting would let the
+                    // control be removed by declaring an unregistered purpose.
+                    let Some(allowed) = self.purpose_fields.allowed_fields(&tag.purpose) else {
+                        return deny(BarrierCondition::PersonalDataFieldOutOfScope);
+                    };
+                    // 11 — every declared field must appear in the allowed set. An
+                    // empty allowed set admits a datum declaring no fields (vacuous)
+                    // and refuses any declared field.
+                    if !tag.fields.iter().all(|f| allowed.contains(f)) {
+                        return deny(BarrierCondition::PersonalDataFieldOutOfScope);
                     }
+                }
                 BarrierVerdict::Allow
             }
             None => match context {
@@ -303,9 +302,7 @@ impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Huth<C,
     }
 }
 
-impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Barrier
-    for Huth<C, A, F>
-{
+impl<C: EndpointCeiling, A: AcceptanceResolver, F: PurposeFieldResolver> Barrier for Huth<C, A, F> {
     fn evaluate(&self, flow: &BoundaryFlow, now: Timestamp) -> BarrierVerdict {
         match flow {
             BoundaryFlow::Egress {

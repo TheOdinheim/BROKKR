@@ -157,10 +157,7 @@ impl Rfc3161Client {
     /// the production trust decision ends up asserting against a restatement of it, which is
     /// what CLAUDE.md §7 calls a circular audit. This is the function that decides whether a
     /// token is acceptable; it is the function the tests should drive.
-    pub fn verify(
-        &self,
-        token: &[u8],
-    ) -> Result<brokkr_crypto::ffi::VerifiedCms, TimestampError> {
+    pub fn verify(&self, token: &[u8]) -> Result<brokkr_crypto::ffi::VerifiedCms, TimestampError> {
         let map_cms = |e: CmsError| match e {
             CmsError::Malformed => TimestampError::Malformed,
             CmsError::SignatureInvalid => TimestampError::SignatureInvalid,

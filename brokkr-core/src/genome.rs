@@ -11,7 +11,10 @@
 use crate::capability::ConformanceTier;
 use crate::classification::{Classification, NamedGroup};
 use crate::crypto::{Digest, DualSignature, HashAlg, KemAlg, SignatureAlg};
-use crate::ids::{ClientCertRef, Dap, FieldName, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId, Timestamp, ToolId, TrustAnchor};
+use crate::ids::{
+    ClientCertRef, Dap, FieldName, GenomeVersion, ModelEndpointId, ModelIdentity, Score, SubjectId,
+    Timestamp, ToolId, TrustAnchor,
+};
 use crate::intent::{Capability, Invariant};
 use crate::personal_data::Purpose;
 use crate::tolerance::ResponseClass;

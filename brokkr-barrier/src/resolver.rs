@@ -7,10 +7,10 @@
 //! but `brokkr-barrier` SHALL NOT depend on `brokkr-genome` (§6.5). REGIN supplies a
 //! [`EndpointCeiling`] implementation; the Barrier consumes the trait.
 
-use brokkr_core::ids::FieldName;
-use brokkr_core::personal_data::Purpose;
 use brokkr_core::classification::Classification;
+use brokkr_core::ids::FieldName;
 use brokkr_core::ids::{FindingId, ModelEndpointId, RiskAcceptanceId};
+use brokkr_core::personal_data::Purpose;
 use brokkr_core::risk::RiskAcceptance;
 use std::collections::BTreeMap;
 

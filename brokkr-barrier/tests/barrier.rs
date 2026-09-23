@@ -13,7 +13,10 @@ use brokkr_core::barrier::{
 use brokkr_core::capability::EgressProtocol;
 use brokkr_core::classification::{ChannelStrength, Classification};
 use brokkr_core::crypto::DualSignature;
-use brokkr_core::ids::{Dap, DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath, RiskAcceptanceId, Timestamp};
+use brokkr_core::ids::{
+    Dap, DatumRef, FieldName, FindingId, Host, ModelEndpointId, OriginId, ResourcePath,
+    RiskAcceptanceId, Timestamp,
+};
 use brokkr_core::personal_data::{Purpose, RetentionPeriod};
 use brokkr_core::risk::{DeterministicGateId, RiskAcceptance};
 use brokkr_crypto::{DualKeyPair, DualPublicKey};
@@ -592,7 +595,12 @@ fn privileged_ingress(
         NOW + 1000,
     );
     (
-        ingress("in-1", Some(t.clone()), Some(bcr.clone()), ContextClass::Privileged),
+        ingress(
+            "in-1",
+            Some(t.clone()),
+            Some(bcr.clone()),
+            ContextClass::Privileged,
+        ),
         bcr,
     )
 }
@@ -649,8 +657,10 @@ fn test_oqgf_p_11_2_out_of_scope_field_is_refused() {
             // condition is reached only once provenance is established.
             assert_eq!(finding.classification, Classification::Secret);
         }
-        other => panic!("expected Deny, got {other:?} — quarantine would imply a later step \
-                         could make this datum admissible as it stands"),
+        other => panic!(
+            "expected Deny, got {other:?} — quarantine would imply a later step \
+                         could make this datum admissible as it stands"
+        ),
     }
 }
 

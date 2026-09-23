@@ -2,7 +2,7 @@
 //! signatures HÚÐ verifies, and the real HÚÐ gate (no mock barrier — "one gate, one logic").
 
 use brokkr_barrier::canonical::bcr_signed_content;
-use brokkr_barrier::{InMemoryPurposeFields, InMemoryAcceptances, InMemoryCeiling};
+use brokkr_barrier::{InMemoryAcceptances, InMemoryCeiling, InMemoryPurposeFields};
 use brokkr_bifrost::{Bifrost, CrossingRecord};
 
 use brokkr_core::barrier::{

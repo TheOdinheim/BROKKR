@@ -316,9 +316,21 @@ fn ca_dir() -> PathBuf {
     // The root, and an UNRELATED root for the untrusted-signer case.
     for (name, cn) in [("ca", "BROKKR Test Root"), ("other", "Unrelated Root")] {
         run(&[
-            "req", "-x509", "-newkey", "rsa:2048", "-keyout",
-            &format!("{name}.key"), "-out", &format!("{name}.crt"), "-days", "3", "-nodes",
-            "-subj", &format!("/CN={cn}"), "-addext", "basicConstraints=critical,CA:TRUE",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            &format!("{name}.key"),
+            "-out",
+            &format!("{name}.crt"),
+            "-days",
+            "3",
+            "-nodes",
+            "-subj",
+            &format!("/CN={cn}"),
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
         ]);
         der(name);
     }
@@ -330,24 +342,55 @@ fn ca_dir() -> PathBuf {
         ("noteku", "noteku_ext", "20250101000000Z", "20350101000000Z"),
         // Carries id-kp-timeStamping, but NOT critical. RFC 3161 §2.3 refuses it, and it is
         // the case that passed every check through ARCH Rev 1.26.
-        ("noncrit", "tsa_noncrit_ext", "20250101000000Z", "20350101000000Z"),
+        (
+            "noncrit",
+            "tsa_noncrit_ext",
+            "20250101000000Z",
+            "20350101000000Z",
+        ),
         // Carries id-kp-timeStamping AND another purpose, so the key is not reserved to
         // timestamping. `both` reads 0x24, `anyeku` reads 0x21 — both observed.
         ("both", "tsa_both_ext", "20250101000000Z", "20350101000000Z"),
-        ("anyeku", "tsa_anyeku_ext", "20250101000000Z", "20350101000000Z"),
+        (
+            "anyeku",
+            "tsa_anyeku_ext",
+            "20250101000000Z",
+            "20350101000000Z",
+        ),
         ("expired", "tsa_ext", "20200101000000Z", "20200201000000Z"),
         ("future", "tsa_ext", "20300101000000Z", "20310101000000Z"),
     ];
     for (name, ext, start, end) in leaves {
         run(&[
-            "req", "-newkey", "rsa:2048", "-keyout", &format!("{name}.key"),
-            "-out", &format!("{name}.csr"), "-nodes", "-subj",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            &format!("{name}.key"),
+            "-out",
+            &format!("{name}.csr"),
+            "-nodes",
+            "-subj",
             &format!("/CN=BROKKR {name}"),
         ]);
         run(&[
-            "ca", "-batch", "-config", "ca.cnf", "-in", &format!("{name}.csr"),
-            "-out", &format!("{name}.crt"), "-extfile", "ca.cnf", "-extensions", ext,
-            "-startdate", start, "-enddate", end, "-notext",
+            "ca",
+            "-batch",
+            "-config",
+            "ca.cnf",
+            "-in",
+            &format!("{name}.csr"),
+            "-out",
+            &format!("{name}.crt"),
+            "-extfile",
+            "ca.cnf",
+            "-extensions",
+            ext,
+            "-startdate",
+            start,
+            "-enddate",
+            end,
+            "-notext",
         ]);
         der(name);
     }
@@ -531,13 +574,22 @@ fn test_a3_non_exclusive_timestamping_eku_is_refused() {
 
     // The conforming leaf is exclusive.
     let g = brokkr_crypto::ffi::cert_timestamping_eku(&good).expect("parse good");
-    assert!(g.exclusive, "critical,timeStamping alone is exclusive (0x20)");
+    assert!(
+        g.exclusive,
+        "critical,timeStamping alone is exclusive (0x20)"
+    );
     assert!(g.satisfies_rfc3161());
     assert_eq!(g.rfc3161_verdict(), Ok(()));
 
     for (name, why) in [
-        ("both", "timeStamping+clientAuth (0x24): the key also authenticates TLS clients"),
-        ("anyeku", "timeStamping+anyExtendedKeyUsage (0x21): anyEKU nullifies the restriction"),
+        (
+            "both",
+            "timeStamping+clientAuth (0x24): the key also authenticates TLS clients",
+        ),
+        (
+            "anyeku",
+            "timeStamping+anyExtendedKeyUsage (0x21): anyEKU nullifies the restriction",
+        ),
     ] {
         let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
         let eku = brokkr_crypto::ffi::cert_timestamping_eku(&der).expect("parse");
@@ -549,8 +601,7 @@ fn test_a3_non_exclusive_timestamping_eku_is_refused() {
         assert!(!eku.exclusive, "{name}: but not exclusively");
         assert!(!eku.satisfies_rfc3161());
 
-        let e = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[])
-            .unwrap_err();
+        let e = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[]).unwrap_err();
         assert_eq!(
             e,
             brokkr_crypto::ffi::PathError::TimestampingEkuNotExclusive,
@@ -581,10 +632,26 @@ fn test_a3_the_three_eku_failures_are_distinguished() {
     let root = std::fs::read(dir.join("ca.der")).expect("root");
 
     let cases: [(&str, P, TimestampError); 4] = [
-        ("noteku", P::TimestampingEkuAbsent, TimestampError::NotTimestampingCertificate),
-        ("noncrit", P::TimestampingEkuNotCritical, TimestampError::TimestampingEkuNotCritical),
-        ("both", P::TimestampingEkuNotExclusive, TimestampError::TimestampingEkuNotExclusive),
-        ("anyeku", P::TimestampingEkuNotExclusive, TimestampError::TimestampingEkuNotExclusive),
+        (
+            "noteku",
+            P::TimestampingEkuAbsent,
+            TimestampError::NotTimestampingCertificate,
+        ),
+        (
+            "noncrit",
+            P::TimestampingEkuNotCritical,
+            TimestampError::TimestampingEkuNotCritical,
+        ),
+        (
+            "both",
+            P::TimestampingEkuNotExclusive,
+            TimestampError::TimestampingEkuNotExclusive,
+        ),
+        (
+            "anyeku",
+            P::TimestampingEkuNotExclusive,
+            TimestampError::TimestampingEkuNotExclusive,
+        ),
     ];
 
     let mut seen: Vec<P> = Vec::new();
@@ -592,7 +659,11 @@ fn test_a3_the_three_eku_failures_are_distinguished() {
         let der = std::fs::read(dir.join(format!("{name}.der"))).expect("leaf");
         let got = brokkr_crypto::ffi::verify_cert_path(&der, &root, &[]).unwrap_err();
         assert_eq!(got, want_path, "{name}");
-        assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(got), want_ts, "{name}");
+        assert_eq!(
+            brokkr_audit::rfc3161::path_to_timestamp_error(got),
+            want_ts,
+            "{name}"
+        );
         seen.push(got);
     }
 
@@ -600,7 +671,11 @@ fn test_a3_the_three_eku_failures_are_distinguished() {
     // exists to provide, and the one a single variant would silently lose.
     seen.sort_by_key(|e| format!("{e:?}"));
     seen.dedup();
-    assert_eq!(seen.len(), 3, "three clauses must yield three distinct verdicts");
+    assert_eq!(
+        seen.len(),
+        3,
+        "three clauses must yield three distinct verdicts"
+    );
 
     // And the conforming leaf still passes all three.
     let good = std::fs::read(dir.join("good.der")).expect("good");
@@ -655,7 +730,10 @@ fn test_a3_corrupted_signature_reports_signature_invalid() {
         "reporting this as UntrustedSigner would send an operator to fix an anchor set that \
          is correct — the Rev 1.26 distinction, asserted here from the other direction"
     );
-    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::SignatureInvalid);
+    assert_eq!(
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
+        TimestampError::SignatureInvalid
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -740,7 +818,6 @@ fn test_a3_anchor_equality_still_accepts_a_conformant_signer() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-
 /// Garbage that is not a certificate reports `Malformed`, via the catch-all arm.
 ///
 /// **`PathError::Malformed` had zero assertions before this test.** Its only appearance in
@@ -805,7 +882,9 @@ fn test_a3_unreachable_authority_is_named_as_such() {
     let client = brokkr_audit::Rfc3161Client::new(
         format!("127.0.0.1:{port}"),
         "unreachable-test",
-        brokkr_audit::SignerTrust::AnchorEquality { anchor_der: vec![0u8; 4] },
+        brokkr_audit::SignerTrust::AnchorEquality {
+            anchor_der: vec![0u8; 4],
+        },
         std::time::Duration::from_millis(500),
     );
 
@@ -846,13 +925,19 @@ fn test_a3_expired_and_not_yet_valid_signers_are_named_distinctly() {
     let e = brokkr_crypto::ffi::verify_cert_path(&expired, &root, &[])
         .expect_err("an expired signer must not validate");
     assert_eq!(e, brokkr_crypto::ffi::PathError::Expired);
-    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::CertificateExpired);
+    assert_eq!(
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
+        TimestampError::CertificateExpired
+    );
 
     let future = std::fs::read(dir.join("future.der")).expect("future");
     let e = brokkr_crypto::ffi::verify_cert_path(&future, &root, &[])
         .expect_err("a not-yet-valid signer must not validate");
     assert_eq!(e, brokkr_crypto::ffi::PathError::NotYetValid);
-    assert_eq!(brokkr_audit::rfc3161::path_to_timestamp_error(e), TimestampError::CertificateNotYetValid);
+    assert_eq!(
+        brokkr_audit::rfc3161::path_to_timestamp_error(e),
+        TimestampError::CertificateNotYetValid
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -875,8 +960,7 @@ fn test_a3_anchor_equality_is_unchanged_and_is_not_upgraded() {
     let wrong = std::fs::read(other.join("tsa.crt.der")).expect("wrong anchor");
 
     // The self-signed responder verifies under equality, exactly as at Rev 1.25.
-    brokkr_crypto::ffi::cms_verify(&token, &anchor)
-        .expect("the self-signed TSA is its own anchor");
+    brokkr_crypto::ffi::cms_verify(&token, &anchor).expect("the self-signed TSA is its own anchor");
 
     // An unrelated anchor is still rejected under equality — no fallback to a chain search.
     assert!(
@@ -887,7 +971,6 @@ fn test_a3_anchor_equality_is_unchanged_and_is_not_upgraded() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&other);
 }
-
 
 /// **End to end through `TimestampAuthority::stamp` with a CA-issued authority.**
 ///

@@ -246,8 +246,7 @@ unsafe extern "C" {
 
     // DecodedCert, for the EKU byte only. The chain decision is the CertManager's.
     fn wc_InitDecodedCert(cert: *mut c_void, source: *const Byte, sz: Word32, heap: *mut c_void);
-    fn wc_ParseCert(cert: *mut c_void, cert_type: c_int, verify: c_int, cm: *mut c_void)
-    -> c_int;
+    fn wc_ParseCert(cert: *mut c_void, cert_type: c_int, verify: c_int, cm: *mut c_void) -> c_int;
     fn wc_FreeDecodedCert(cert: *mut c_void);
     fn brokkr_cert_ext_key_usage(dc: *const c_void) -> Word32;
     fn brokkr_cert_ext_key_usage_crit(dc: *const c_void) -> Word32;
@@ -1161,12 +1160,8 @@ pub fn verify_cert_path(
         }
         // Root first, then intermediates in trust order.
         let load = |der: &[u8]| -> bool {
-            wolfSSL_CertManagerLoadCABuffer(
-                cm,
-                der.as_ptr(),
-                der.len() as c_long,
-                FILETYPE_ASN1,
-            ) == WOLFSSL_SUCCESS
+            wolfSSL_CertManagerLoadCABuffer(cm, der.as_ptr(), der.len() as c_long, FILETYPE_ASN1)
+                == WOLFSSL_SUCCESS
         };
         if !load(root_der) {
             wolfSSL_CertManagerFree(cm);
@@ -1277,7 +1272,12 @@ pub fn cert_timestamping_eku(cert_der: &[u8]) -> Result<TimestampingEku, PathErr
     // wc_InitDecodedCert requires. `cert_der` outlives every call. Free happens on both
     // paths before returning.
     unsafe {
-        wc_InitDecodedCert(p, cert_der.as_ptr(), cert_der.len() as Word32, ptr::null_mut());
+        wc_InitDecodedCert(
+            p,
+            cert_der.as_ptr(),
+            cert_der.len() as Word32,
+            ptr::null_mut(),
+        );
         let rc = wc_ParseCert(p, CERT_TYPE, NO_VERIFY, ptr::null_mut());
         if rc != 0 {
             wc_FreeDecodedCert(p);
